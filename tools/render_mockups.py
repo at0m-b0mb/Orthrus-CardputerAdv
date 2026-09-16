@@ -56,7 +56,7 @@ HEADER_H = 16
 FOOTER_H = 12
 BODY_TOP = 21
 CENSUS_ROW_H = 14
-GRID_X, GRID_Y = 180, 26
+GRID_X, GRID_Y = 168, 26  # keep in step with kGridX in src/modules/airspace.cpp
 
 FONT_DIRS = [
     "/System/Library/Fonts/Supplemental/",
