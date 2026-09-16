@@ -17,7 +17,7 @@ namespace bd = orthrus::board;
 
 namespace {
 
-constexpr char kVersion[] = "0.1.0";
+constexpr char kVersion[] = "1.0.0";
 
 constexpr char kKeyUp   = ';';
 constexpr char kKeyDown = '.';

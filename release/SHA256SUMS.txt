@@ -1,0 +1,2 @@
+cb4e17401cda71b5e16a309de1b2f861fa9d5519654490813fd53e343ae65a4e  orthrus-1.0.0-cardputer-adv.bin
+e146258acb2e54fa77a1f4469abadd9b24a8a4bd4b32397341ee62074477c087  orthrus-1.0.0-firmware-only.bin
