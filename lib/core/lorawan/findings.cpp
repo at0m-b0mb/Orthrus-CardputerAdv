@@ -156,16 +156,23 @@ DeviceAssessment assess(const DeviceRecord& d, const CaptureContext& ctx) {
 
     // ---- presence-based: observed, therefore scored at full weight ----------
 
-    if (d.fcntResets > 0) {
+    // Each direction's counter is judged on its own. Comparing an uplink
+    // counter against a downlink one is meaningless -- they are independent
+    // sequences -- and doing so turned ordinary ACK traffic into a dozen false
+    // Critical findings on a device that was behaving perfectly.
+    const uint32_t resets  = d.up.resets + d.down.resets;
+    const uint32_t repeats = d.up.repeats + d.down.repeats;
+
+    if (resets > 0) {
         // Seeing this even once is decisive; seeing it repeatedly is not more
         // decisive, it is just more embarrassing.
         fs.add(FindingId::FCntReset, Severity::Critical, 95);
     }
 
-    if (d.fcntRepeats > 0) {
+    if (repeats > 0) {
         // Ambiguous by nature, so confidence rises with how often it happened:
         // one repeat is a retransmission, ten is a pattern.
-        const uint8_t conf = d.fcntRepeats >= 5 ? 75 : 50;
+        const uint8_t conf = repeats >= 5 ? 75 : 50;
         fs.add(FindingId::FCntRepeat, Severity::Medium, conf);
     }
 
@@ -184,14 +191,18 @@ DeviceAssessment assess(const DeviceRecord& d, const CaptureContext& ctx) {
 
     // "Never set ADR" is technically an absence, but it is an absence *within
     // frames we did receive* rather than across spectrum we could not hear, so
-    // it is not coverage-limited. It does need enough frames to mean anything.
+    // it is not coverage-limited. Counted on uplinks only: the ADR bit in a
+    // downlink is the network talking, not the device.
     if (d.kind == DeviceKind::Session && d.adrSetCount == 0 &&
         d.adrClearCount >= kMinFramesForFullGrade) {
         fs.add(FindingId::AdrDisabled, Severity::Low, 80);
     }
 
-    if (d.kind == DeviceKind::Session && d.framesSeen >= kMinFramesForFullGrade &&
-        d.confirmedCount * 100u >= d.framesSeen * 80u) {
+    // Ratio of confirmed uplinks to uplinks -- not to all frames. Including
+    // downlinks in the denominator quietly halved the ratio for any device the
+    // network answered, which is most of them.
+    if (d.kind == DeviceKind::Session && d.uplinkCount >= kMinFramesForFullGrade &&
+        d.confirmedUplinkCount * 100u >= d.uplinkCount * 80u) {
         fs.add(FindingId::ConfirmedUplinkHeavy, Severity::Low, 75);
     }
 
@@ -199,7 +210,12 @@ DeviceAssessment assess(const DeviceRecord& d, const CaptureContext& ctx) {
         fs.add(FindingId::JoinChurn, Severity::Medium, 70);
     }
 
-    if (d.sfMin != 0xFF && d.sfMin >= 11 && d.framesSeen >= 3) {
+    // Only claimable if we actually swept more than one spreading factor.
+    // Parked on SF12, every device we are capable of hearing is at SF12 -- so
+    // this finding would fire on the whole census and be describing our own
+    // tuning rather than anything about the devices.
+    if (ctx.canJudgeSpreadingFactor() && d.sfMin != 0xFF && d.sfMin >= 11 &&
+        d.framesSeen >= 3) {
         fs.add(FindingId::StuckHighSF, Severity::Low, 70);
     }
 

@@ -43,6 +43,9 @@ public:
 
     float instantRssi();
 
+    // Drop the receiver to standby. Called when the operator leaves the module.
+    void idle();
+
     const RadioConfig& config() const { return cfg_; }
     const RadioStats&  stats() const { return stats_; }
     const char*        lastError() const { return lastError_; }

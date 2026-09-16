@@ -30,7 +30,6 @@ constexpr char kKeyDown = '.';
 constexpr int kListTop    = 21;
 constexpr int kRowH       = 15;
 constexpr int kDetailRule = 99;
-constexpr int kDetailText = 104;
 
 struct Surface {
     const char* name;
@@ -52,8 +51,8 @@ constexpr int kSurfaceCount = sizeof(kSurfaces) / sizeof(kSurfaces[0]);
 int g_selected = 0;
 
 void drawSplash() {
-    auto& d = M5Cardputer.Display;
-    d.fillScreen(kInk);
+    orthrus::ui::beginFrame();
+    auto& d = orthrus::ui::gfx();
 
     d.setFont(kFaceIdentity);
     d.setTextDatum(middle_center);
@@ -76,11 +75,12 @@ void drawSplash() {
     d.drawString(ver, bd::kScreenW / 2, 104);
 
     d.setTextDatum(top_left);
+    orthrus::ui::endFrame();
 }
 
 void drawMenu() {
-    auto& d = M5Cardputer.Display;
-    d.fillScreen(kInk);
+    orthrus::ui::beginFrame();
+    auto& d = orthrus::ui::gfx();
 
     char batt[12];
     std::snprintf(batt, sizeof(batt), "%d%%", M5.Power.getBatteryLevel());
@@ -109,6 +109,7 @@ void drawMenu() {
     orthrus::ui::detailStrip(kDetailRule, kSurfaces[g_selected].blurb);
     orthrus::ui::footer("; . move    enter open");
     d.setTextDatum(top_left);
+    orthrus::ui::endFrame();
 }
 
 // Shared "press anything to return" wait, so every dead end behaves the same.
@@ -122,8 +123,8 @@ void waitForKey() {
 }
 
 void notReady(const Surface& s) {
-    auto& d = M5Cardputer.Display;
-    d.fillScreen(kInk);
+    orthrus::ui::beginFrame();
+    auto& d = orthrus::ui::gfx();
     orthrus::ui::chrome(s.name);
 
     d.setFont(kFaceData);
@@ -138,12 +139,13 @@ void notReady(const Surface& s) {
     d.drawString("worse than saying so.", 8, kHeaderH + 66);
 
     orthrus::ui::footer("any key   back");
+    orthrus::ui::endFrame();
     waitForKey();
 }
 
 void radioFailed() {
-    auto& d = M5Cardputer.Display;
-    d.fillScreen(kInk);
+    orthrus::ui::beginFrame();
+    auto& d = orthrus::ui::gfx();
     orthrus::ui::chrome("Airspace");
 
     d.setFont(kFaceData);
@@ -155,6 +157,7 @@ void radioFailed() {
     d.drawString("and the antenna is fitted.", 8, kHeaderH + 46);
 
     orthrus::ui::footer("any key   back");
+    orthrus::ui::endFrame();
     waitForKey();
 }
 
@@ -183,7 +186,16 @@ void setup() {
     M5Cardputer.Display.setRotation(1);
     Serial.begin(115200);
 
+    const uint32_t heapBefore = ESP.getFreeHeap();
     drawSplash();
+    // Worth stating out loud: if the frame buffer could not be allocated the
+    // device still works, but it flickers, and that should be diagnosable
+    // without guessing.
+    Serial.printf("[orthrus] heap %u -> %u, double-buffered=%s\n",
+                  static_cast<unsigned>(heapBefore),
+                  static_cast<unsigned>(ESP.getFreeHeap()),
+                  (heapBefore - ESP.getFreeHeap()) > 50000 ? "yes" : "NO");
+
     const uint32_t deadline = millis() + 6000;
     for (;;) {
         M5Cardputer.update();

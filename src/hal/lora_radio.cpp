@@ -31,6 +31,11 @@ constexpr uint8_t kSyncWordPublic = 0x34;
 }  // namespace
 
 bool LoraRadio::begin() {
+    // Entering and leaving Airspace calls this again. Re-running SPI bring-up
+    // and the full radio init on a live bus is asking for trouble, and the
+    // second init would also silently discard the tuning we were using.
+    if (ready_) return true;
+
     g_spi.begin(bd::kLoraSck, bd::kLoraMiso, bd::kLoraMosi, bd::kLoraCs);
 
     // Deliberately not RadioLib's defaults:
@@ -78,6 +83,12 @@ bool LoraRadio::begin() {
 
 bool LoraRadio::configure(const RadioConfig& cfg) {
     if (!ready_) return false;
+
+    // The SX1262 latches SetModulationParams in standby; issued while the modem
+    // is in receive they can be ignored outright. That would make every hop a
+    // no-op -- the display would claim a new channel and SF while the radio
+    // stayed exactly where it was, which is the worst kind of wrong.
+    g_radio.standby();
 
     // Order matters: the image calibration RadioLib performs on setFrequency is
     // band-dependent, so frequency goes first.
@@ -157,6 +168,12 @@ int LoraRadio::poll(uint8_t* buf, size_t cap, lorawan::RxMeta& meta) {
 float LoraRadio::instantRssi() {
     if (!ready_) return 0.0f;
     return g_radio.getRSSI(false);
+}
+
+void LoraRadio::idle() {
+    // Leaving the receiver running after the operator has walked away costs
+    // real battery on a device whose whole point is being carried.
+    if (ready_) g_radio.standby();
 }
 
 }  // namespace orthrus::hal

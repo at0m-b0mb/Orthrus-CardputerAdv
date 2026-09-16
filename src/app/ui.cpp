@@ -19,10 +19,37 @@ namespace bd = orthrus::board;
 // middle_left at the row's centre line and the glyphs land where the rectangle
 // is. This was a real defect on hardware, not a theoretical one.
 
-void chrome(const char* title, const char* right) {
-    auto& d = M5Cardputer.Display;
+namespace {
 
-    d.fillRect(0, 0, bd::kScreenW, kHeaderH, kInk);
+M5Canvas g_canvas(&M5Cardputer.Display);
+bool     g_haveCanvas = false;
+bool     g_attempted  = false;
+
+}  // namespace
+
+LovyanGFX& gfx() {
+    return g_haveCanvas ? static_cast<LovyanGFX&>(g_canvas)
+                        : static_cast<LovyanGFX&>(M5Cardputer.Display);
+}
+
+bool beginFrame() {
+    if (!g_attempted) {
+        g_attempted = true;
+        g_canvas.setColorDepth(16);
+        // 240 x 135 x 16bpp is ~65 KB against ~359 KB of heap. Affordable, but
+        // checked rather than assumed: there is no PSRAM to fall back on.
+        g_haveCanvas = (g_canvas.createSprite(bd::kScreenW, bd::kScreenH) != nullptr);
+    }
+    gfx().fillScreen(kInk);
+    return g_haveCanvas;
+}
+
+void endFrame() {
+    if (g_haveCanvas) g_canvas.pushSprite(0, 0);
+}
+
+void chrome(const char* title, const char* right) {
+    auto& d = gfx();
 
     d.setFont(kFaceIdentity);
     d.setTextDatum(middle_left);
@@ -39,17 +66,14 @@ void chrome(const char* title, const char* right) {
     // The single gold rule. It is the only ornament in the product, so it does
     // the work of making the header feel deliberate.
     d.drawFastHLine(0, kHeaderH, bd::kScreenW, kBrass);
-
     d.setTextDatum(top_left);
 }
 
 void footer(const char* hint) {
-    auto& d = M5Cardputer.Display;
+    auto& d = gfx();
     const int top = bd::kScreenH - kFooterH;
 
-    d.fillRect(0, top, bd::kScreenW, kFooterH, kInk);
     d.drawFastHLine(0, top, bd::kScreenW, kRule);
-
     d.setFont(kFaceData);
     d.setTextDatum(middle_left);
     d.setTextColor(kFaint, kInk);
@@ -58,9 +82,8 @@ void footer(const char* hint) {
 }
 
 void listRow(int y, int height, bool selected) {
-    auto& d = M5Cardputer.Display;
     if (!selected) return;
-
+    auto& d = gfx();
     d.fillRect(0, y, bd::kScreenW, height, kSurface);
     // A gold edge rather than a gold fill: bright gold cannot carry text, so it
     // marks the row from the side instead.
@@ -68,7 +91,7 @@ void listRow(int y, int height, bool selected) {
 }
 
 void detailStrip(int y, const char* text) {
-    auto& d = M5Cardputer.Display;
+    auto& d = gfx();
     d.drawFastHLine(0, y, bd::kScreenW, kRule);
     d.setFont(kFaceData);
     d.setTextDatum(top_left);
@@ -76,26 +99,30 @@ void detailStrip(int y, const char* text) {
     d.drawString(text, kPad + 2, y + 5);
 }
 
-void coverageGrid(int x, int y, uint8_t channels, uint8_t sfs,
-                  int litChannel, int litSf) {
-    auto& d = M5Cardputer.Display;
+int coverageGrid(int x, int y, uint8_t cols, uint8_t rows, int litCol, int litRow,
+                 int maxWidth) {
+    auto& d = gfx();
+    if (cols == 0 || rows == 0) return y;
 
-    constexpr int kCell = 4;
-    constexpr int kGap  = 1;
+    constexpr int kGap = 1;
+    int cell = (maxWidth - (cols - 1) * kGap) / cols;
+    if (cell > 4) cell = 4;
+    if (cell < 2) cell = 2;
 
-    for (int ch = 0; ch < channels; ch++) {
-        for (int sf = 0; sf < sfs; sf++) {
-            const int cx = x + ch * (kCell + kGap);
-            const int cy = y + sf * (kCell + kGap);
-            if (ch == litChannel && sf == litSf) {
-                d.fillRect(cx, cy, kCell, kCell, kShine);
+    for (int c = 0; c < cols; c++) {
+        for (int r = 0; r < rows; r++) {
+            const int cx = x + c * (cell + kGap);
+            const int cy = y + r * (cell + kGap);
+            if (c == litCol && r == litRow) {
+                d.fillRect(cx, cy, cell, cell, kShine);
             } else {
                 // Unheard cells are drawn, never omitted. The whole point is
                 // that they exist and we are deaf to them.
-                d.drawRect(cx, cy, kCell, kCell, kRule);
+                d.drawRect(cx, cy, cell, cell, kRule);
             }
         }
     }
+    return y + rows * (cell + kGap);
 }
 
 uint16_t severityColour(lorawan::Severity s) {
@@ -128,35 +155,47 @@ void textAt(int x, int y, uint16_t colour, const char* fmt, ...) {
     vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
 
-    auto& d = M5Cardputer.Display;
+    auto& d = gfx();
     d.setTextDatum(middle_left);
     d.setTextColor(colour, kInk);
     d.drawString(buf, x, y);
     d.setTextDatum(top_left);
 }
 
+void textRight(int rightEdge, int y, uint16_t colour, const char* fmt, ...) {
+    char buf[72];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+
+    auto& d = gfx();
+    d.setTextDatum(middle_right);
+    d.setTextColor(colour, kInk);
+    d.drawString(buf, rightEdge, y);
+    d.setTextDatum(top_left);
+}
+
 int wrapText(int x, int y, int maxWidth, int lineHeight, int maxLines,
              uint16_t colour, const char* text) {
-    auto& d = M5Cardputer.Display;
+    auto& d = gfx();
     d.setTextDatum(top_left);
     d.setTextColor(colour, kInk);
 
-    char line[64];
+    char   line[64];
     size_t lineLen = 0;
     int    drawn   = 0;
 
     const char* word = text;
     while (drawn < maxLines) {
-        // Take the next word, including the space that follows it.
         const char* end = word;
         while (*end && *end != ' ') end++;
         const size_t wordLen = static_cast<size_t>(end - word);
         if (wordLen == 0 && *end == '\0') break;
 
-        // Would it still fit? Measure the candidate rather than guessing a
-        // characters-per-line constant, which is wrong the moment the face
-        // changes.
-        char candidate[64];
+        // Measure the candidate rather than assuming a characters-per-line
+        // constant, which is wrong the moment the face changes.
+        char         candidate[64];
         const size_t sep = (lineLen > 0) ? 1u : 0u;
         if (lineLen + sep + wordLen >= sizeof(candidate)) break;
 
@@ -186,20 +225,6 @@ int wrapText(int x, int y, int maxWidth, int lineHeight, int maxLines,
         drawn++;
     }
     return y + drawn * lineHeight;
-}
-
-void textRight(int rightEdge, int y, uint16_t colour, const char* fmt, ...) {
-    char buf[72];
-    va_list ap;
-    va_start(ap, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, ap);
-    va_end(ap);
-
-    auto& d = M5Cardputer.Display;
-    d.setTextDatum(middle_right);
-    d.setTextColor(colour, kInk);
-    d.drawString(buf, rightEdge, y);
-    d.setTextDatum(top_left);
 }
 
 }  // namespace orthrus::ui

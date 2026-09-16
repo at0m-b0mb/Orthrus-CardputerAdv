@@ -33,6 +33,27 @@ enum class DeviceKind : uint8_t {
     Joiner,   // identified by DevEUI, seen in join requests
 };
 
+// One frame counter's history.
+//
+// There are TWO of these per device and they must never be mixed. LoRaWAN runs
+// an independent counter in each direction: FCntUp on uplinks, FCntDown on
+// downlinks. They have no relationship to one another, so folding them into a
+// single sequence makes ordinary ACK traffic look like a device resetting its
+// counter over and over -- which is this tool's most severe finding. That bug
+// was real, graded a healthy device F, and is what this type exists to prevent.
+struct CounterTrack {
+    uint16_t first = 0;
+    uint16_t last  = 0;
+    bool     have  = false;
+
+    uint32_t resets    = 0;  // went backwards, and not a legitimate rollover
+    uint32_t repeats   = 0;  // exact same counter seen again
+    uint32_t rollovers = 0;
+    uint16_t maxJump   = 0;
+
+    void observe(uint16_t fcnt);
+};
+
 // How many recent DevNonces to remember per joiner.
 //
 // LoRaWAN 1.0.x lets a device pick DevNonce randomly, so a repeat inside a
@@ -51,14 +72,9 @@ struct DeviceRecord {
     uint32_t firstSeenMs = 0;
     uint32_t lastSeenMs  = 0;
 
-    // --- frame counter behaviour (Session) ---
-    uint16_t firstFCnt = 0;
-    uint16_t lastFCnt  = 0;
-    bool     haveFCnt  = false;
-    uint32_t fcntResets  = 0;  // went backwards, and not a legitimate rollover
-    uint32_t fcntRepeats = 0;  // exact same counter seen again
-    uint32_t fcntRollovers = 0;
-    uint16_t maxFCntJump = 0;
+    // --- frame counters, one per direction ---
+    CounterTrack up;
+    CounterTrack down;
 
     // --- join behaviour (Joiner) ---
     uint32_t joinCount       = 0;
@@ -74,14 +90,20 @@ struct DeviceRecord {
     uint8_t  sfMax = 0;
     uint32_t lastFreqHz = 0;
 
-    // --- protocol flags, counted rather than latched, so "how often" survives ---
-    uint32_t adrSetCount      = 0;
-    uint32_t adrClearCount    = 0;
-    uint32_t confirmedCount   = 0;
-    uint32_t downlinkCount    = 0;
-    uint32_t fPortZeroCount   = 0;
+    // --- protocol, counted per direction where direction matters -------------
+    // ADR and "is this confirmed" describe the DEVICE, so they are counted on
+    // uplinks only. The same bit in a downlink is the network talking, not the
+    // device, and mixing them made both findings wrong.
+    uint32_t uplinkCount   = 0;
+    uint32_t downlinkCount = 0;
+
+    uint32_t adrSetCount   = 0;  // uplinks with ADR set
+    uint32_t adrClearCount = 0;  // uplinks with ADR clear
+    uint32_t confirmedUplinkCount = 0;
+
+    uint32_t fPortZeroCount = 0;
     uint32_t fPortZeroWithFOptsCount = 0;  // spec violation, see findings
-    uint32_t plaintextCount   = 0;
+    uint32_t plaintextCount = 0;
     uint8_t  bestPlaintextConfidence = 0;
 
     uint32_t activeSpanMs() const {
@@ -101,11 +123,16 @@ struct CaptureContext {
     // Fraction of the region's channel/SF space we could hear, in percent.
     // One SX1262 on one channel at one SF covers 1/48 of EU868 => 2%.
     uint8_t coveragePercent() const;
+
+    // True when we swept more than one spreading factor. Any claim about a
+    // device's CHOICE of spreading factor is unknowable otherwise: parked on
+    // SF12, every device we can hear is by definition at SF12.
+    bool canJudgeSpreadingFactor() const { return sfCovered > 1; }
 };
 
 class Census {
 public:
-    // 128 records is about 13 KB -- affordable, and more devices than a single
+    // 128 records is about 17 KB -- affordable, and more devices than a single
     // channel/SF will realistically surface in one session.
     static constexpr size_t kMaxDevices = 128;
 
@@ -118,9 +145,13 @@ public:
     size_t size() const { return count_; }
     const DeviceRecord& at(size_t i) const { return devices_[i]; }
 
+    // Every frame we parsed, including ones we could not attribute or had no
+    // room to store. This must keep rising when the table is full, or a full
+    // table looks identical to a dead band.
     uint32_t framesObserved() const { return framesObserved_; }
     uint32_t framesDropped() const { return framesDropped_; }
     uint32_t joinsObserved() const { return joinsObserved_; }
+    bool     full() const { return count_ >= kMaxDevices; }
 
 private:
     int findOrCreateSession(uint32_t devAddr);

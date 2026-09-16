@@ -20,6 +20,38 @@ bool isFCntRollover(uint16_t prev, uint16_t next) {
     return prev >= kRolloverHighWater && next <= kRolloverLowWater;
 }
 
+void CounterTrack::observe(uint16_t fcnt) {
+    if (!have) {
+        first = fcnt;
+        last  = fcnt;
+        have  = true;
+        return;
+    }
+
+    if (fcnt == last) {
+        // Same counter twice: a retransmission after a missed ack, or a replay.
+        // We cannot tell which from the air alone, and we do not pretend to.
+        repeats++;
+        return;
+    }
+
+    if (fcnt < last) {
+        if (isFCntRollover(last, fcnt)) {
+            rollovers++;
+        } else {
+            // Backwards without wrapping. For an ABP device this is a reboot,
+            // and it reopens the replay window the counter exists to close.
+            resets++;
+        }
+        last = fcnt;
+        return;
+    }
+
+    const uint16_t jump = static_cast<uint16_t>(fcnt - last);
+    if (jump > maxJump) maxJump = jump;
+    last = fcnt;
+}
+
 uint8_t CaptureContext::coveragePercent() const {
     const uint32_t total = static_cast<uint32_t>(channelsInRegion ? channelsInRegion : 1) *
                            static_cast<uint32_t>(sfInRegion ? sfInRegion : 1);
@@ -68,25 +100,29 @@ int Census::findOrCreateJoiner(const uint8_t devEui[8]) {
 int Census::observe(const Frame& frame, const RxMeta& meta) {
     if (!frame.ok()) return -1;
 
-    int idx = -1;
-    if (frame.mtype == MType::JoinRequest) {
-        idx = findOrCreateJoiner(frame.join.devEui);
-    } else if (frame.isData()) {
-        idx = findOrCreateSession(frame.data.devAddr);
-    } else {
+    const bool trackable =
+        (frame.mtype == MType::JoinRequest) || frame.isData();
+
+    // Counted before anything can reject it. A frame we could not attribute or
+    // had no room for was still heard, and a frame count that freezes when the
+    // table fills makes a busy band look dead.
+    framesObserved_++;
+
+    if (!trackable) {
         // Join accepts are encrypted and carry no identity we can read;
         // proprietary and rejoin frames have no layout we can trust. Counting
         // them as traffic is honest, attributing them to a device is not.
-        framesObserved_++;
         return -1;
     }
 
+    const int idx = (frame.mtype == MType::JoinRequest)
+                        ? findOrCreateJoiner(frame.join.devEui)
+                        : findOrCreateSession(frame.data.devAddr);
     if (idx < 0) {
         framesDropped_++;
         return -1;
     }
 
-    framesObserved_++;
     DeviceRecord& d = devices_[static_cast<size_t>(idx)];
 
     if (d.framesSeen == 0) d.firstSeenMs = meta.timeMs;
@@ -121,10 +157,17 @@ int Census::observe(const Frame& frame, const RxMeta& meta) {
 
     // --- data frame ---
     const DataFields& f = frame.data;
+    const bool uplink   = frame.isUplink();
 
-    if (!frame.isUplink()) d.downlinkCount++;
-    if (frame.isConfirmed()) d.confirmedCount++;
-    if (f.adr) d.adrSetCount++; else d.adrClearCount++;
+    if (uplink) {
+        d.uplinkCount++;
+        // ADR and confirmation describe the device's own behaviour, so they are
+        // only meaningful on frames the device sent.
+        if (f.adr) d.adrSetCount++; else d.adrClearCount++;
+        if (frame.isConfirmed()) d.confirmedUplinkCount++;
+    } else {
+        d.downlinkCount++;
+    }
 
     if (f.hasFPort && f.fPort == 0) {
         d.fPortZeroCount++;
@@ -143,32 +186,9 @@ int Census::observe(const Frame& frame, const RxMeta& meta) {
         }
     }
 
-    if (!d.haveFCnt) {
-        d.firstFCnt = f.fCnt;
-        d.lastFCnt  = f.fCnt;
-        d.haveFCnt  = true;
-        return idx;
-    }
-
-    if (f.fCnt == d.lastFCnt) {
-        // Same counter twice: a retransmission after a missed ack, or a replay.
-        // We cannot tell which from the air alone, and we do not pretend to.
-        d.fcntRepeats++;
-    } else if (f.fCnt < d.lastFCnt) {
-        if (isFCntRollover(d.lastFCnt, f.fCnt)) {
-            d.fcntRollovers++;
-        } else {
-            // The counter went backwards without wrapping. For an ABP device
-            // this is a reboot, and it reopens the replay window that the
-            // counter exists to close.
-            d.fcntResets++;
-        }
-        d.lastFCnt = f.fCnt;
-    } else {
-        const uint16_t jump = static_cast<uint16_t>(f.fCnt - d.lastFCnt);
-        if (jump > d.maxFCntJump) d.maxFCntJump = jump;
-        d.lastFCnt = f.fCnt;
-    }
+    // The counter goes into the track for its OWN direction. Mixing them was a
+    // real bug that turned ordinary ACK traffic into a storm of false resets.
+    (uplink ? d.up : d.down).observe(f.fCnt);
 
     return idx;
 }

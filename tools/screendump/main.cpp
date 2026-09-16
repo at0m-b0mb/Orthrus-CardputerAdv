@@ -165,7 +165,7 @@ int main() {
     ctx.listenedMs       = t;
     ctx.channelsCovered  = 8;
     ctx.channelsInRegion = p.uplinkCount;
-    ctx.sfCovered        = 1;
+    ctx.sfCovered        = 2;  // operator stepped two spreading factors
     ctx.sfInRegion       = p.sfCount();
 
     std::printf("{\n");

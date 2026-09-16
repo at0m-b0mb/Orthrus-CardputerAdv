@@ -43,6 +43,19 @@ Frame dataUp(uint32_t devAddr, uint16_t fCnt, bool adr = true,
     return f;
 }
 
+Frame dataDown(uint32_t devAddr, uint16_t fCnt, bool adr = true,
+               bool confirmed = false) {
+    Frame f;
+    f.mtype = confirmed ? MType::ConfirmedDataDown : MType::UnconfirmedDataDown;
+    f.major = 0;
+    f.data.devAddr = devAddr;
+    f.data.fCnt    = fCnt;
+    f.data.adr     = adr;
+    f.data.hasFPort = true;
+    f.data.fPort    = 1;
+    return f;
+}
+
 Frame joinReq(const uint8_t devEui[8], uint16_t nonce) {
     Frame f;
     f.mtype = MType::JoinRequest;
@@ -158,8 +171,8 @@ void test_rollover_is_not_a_reset() {
     c.observe(dataUp(0x1000, 0xFFFE), meta(1000));
     c.observe(dataUp(0x1000, 0x0003), meta(2000));
     TEST_ASSERT_EQUAL_UINT32(1, c.size());
-    TEST_ASSERT_EQUAL_UINT32(0, c.at(0).fcntResets);
-    TEST_ASSERT_EQUAL_UINT32(1, c.at(0).fcntRollovers);
+    TEST_ASSERT_EQUAL_UINT32(0, c.at(0).up.resets);
+    TEST_ASSERT_EQUAL_UINT32(1, c.at(0).up.rollovers);
 }
 
 void test_midrange_decrease_is_a_reset_not_a_rollover() {
@@ -170,8 +183,8 @@ void test_midrange_decrease_is_a_reset_not_a_rollover() {
     Census c;
     c.observe(dataUp(0x2000, 0x8000), meta(1000));
     c.observe(dataUp(0x2000, 0x0001), meta(2000));
-    TEST_ASSERT_EQUAL_UINT32(1, c.at(0).fcntResets);
-    TEST_ASSERT_EQUAL_UINT32(0, c.at(0).fcntRollovers);
+    TEST_ASSERT_EQUAL_UINT32(1, c.at(0).up.resets);
+    TEST_ASSERT_EQUAL_UINT32(0, c.at(0).up.rollovers);
 }
 
 void test_repeated_counter_counted_separately_from_reset() {
@@ -179,16 +192,16 @@ void test_repeated_counter_counted_separately_from_reset() {
     c.observe(dataUp(0x3000, 10), meta(1000));
     c.observe(dataUp(0x3000, 10), meta(1100));
     c.observe(dataUp(0x3000, 10), meta(1200));
-    TEST_ASSERT_EQUAL_UINT32(2, c.at(0).fcntRepeats);
-    TEST_ASSERT_EQUAL_UINT32(0, c.at(0).fcntResets);
+    TEST_ASSERT_EQUAL_UINT32(2, c.at(0).up.repeats);
+    TEST_ASSERT_EQUAL_UINT32(0, c.at(0).up.resets);
 }
 
 void test_forward_jump_recorded() {
     Census c;
     c.observe(dataUp(0x4000, 1), meta(1000));
     c.observe(dataUp(0x4000, 50), meta(2000));
-    TEST_ASSERT_EQUAL_UINT16(49, c.at(0).maxFCntJump);
-    TEST_ASSERT_EQUAL_UINT32(0, c.at(0).fcntResets);
+    TEST_ASSERT_EQUAL_UINT16(49, c.at(0).up.maxJump);
+    TEST_ASSERT_EQUAL_UINT32(0, c.at(0).up.resets);
 }
 
 // ---- census bookkeeping -----------------------------------------------------
@@ -257,7 +270,7 @@ void test_fcnt_reset_scores_at_full_weight_even_at_low_coverage() {
     DeviceRecord d;
     d.kind = DeviceKind::Session;
     d.framesSeen  = 10;
-    d.fcntResets  = 1;
+    d.up.resets  = 1;
     d.adrSetCount = 10;
 
     const auto a = assess(d, oneRadioContext());
@@ -293,8 +306,8 @@ void test_ceiling_is_a_curve_not_a_clip() {
     tidy.bestPlaintextConfidence = 80;
 
     DeviceRecord messy = tidy;
-    messy.fcntResets  = 3;
-    messy.fcntRepeats = 6;
+    messy.up.resets  = 3;
+    messy.up.repeats = 6;
 
     const auto a = assess(tidy, fullCoverageContext());
     const auto b = assess(messy, fullCoverageContext());
@@ -394,6 +407,133 @@ void test_clean_device_can_still_reach_top_grade() {
     TEST_ASSERT_EQUAL(static_cast<int>(Grade::APlus), static_cast<int>(a.grade));
 }
 
+// ---- regression: the two counters are independent ---------------------------
+
+void test_healthy_bidirectional_traffic_produces_no_findings() {
+    // THE regression test. LoRaWAN runs FCntUp and FCntDown as completely
+    // separate sequences. Folding them into one made a device whose uplink
+    // counter climbed from 500 while the network ACKed from 10 look like it
+    // reset its counter on every single exchange: twelve false CRITICAL
+    // findings, and a grade of F, on a device doing nothing wrong.
+    Census c;
+    uint16_t u = 500, dn = 10;
+    uint32_t t = 0;
+    for (int i = 0; i < 12; i++) {
+        c.observe(dataUp(0x26011BDA, u++), meta(t += 3000));
+        c.observe(dataDown(0x26011BDA, dn++), meta(t += 1000));
+    }
+
+    const DeviceRecord& r = c.at(0);
+    TEST_ASSERT_EQUAL_UINT32(1, c.size());
+    TEST_ASSERT_EQUAL_UINT32(0, r.up.resets);
+    TEST_ASSERT_EQUAL_UINT32(0, r.down.resets);
+    TEST_ASSERT_EQUAL_UINT32(0, r.up.repeats);
+    TEST_ASSERT_EQUAL_UINT32(12, r.uplinkCount);
+    TEST_ASSERT_EQUAL_UINT32(12, r.downlinkCount);
+
+    const auto a = assess(r, fullCoverageContext());
+    TEST_ASSERT_FALSE(a.findings.has(FindingId::FCntReset));
+    TEST_ASSERT_FALSE(a.findings.has(FindingId::FCntRepeat));
+    TEST_ASSERT_EQUAL(static_cast<int>(Grade::APlus), static_cast<int>(a.grade));
+}
+
+void test_downlink_counter_judged_on_its_own_track() {
+    // A downlink counter CAN reset, and that is still a real finding -- it just
+    // has to be measured against other downlinks.
+    Census c;
+    c.observe(dataUp(0x1234, 100), meta(1000));
+    c.observe(dataDown(0x1234, 900), meta(2000));
+    c.observe(dataDown(0x1234, 4), meta(3000));  // genuine downlink reset
+
+    const DeviceRecord& r = c.at(0);
+    TEST_ASSERT_EQUAL_UINT32(0, r.up.resets);
+    TEST_ASSERT_EQUAL_UINT32(1, r.down.resets);
+    TEST_ASSERT_TRUE(assess(r, fullCoverageContext()).findings.has(FindingId::FCntReset));
+}
+
+void test_adr_is_counted_on_uplinks_only() {
+    // The ADR bit in a downlink is the network instructing the device, not the
+    // device's own behaviour, so it must not mask "this device never sets ADR".
+    Census c;
+    for (int i = 0; i < 8; i++) {
+        c.observe(dataUp(0x5555, static_cast<uint16_t>(i), /*adr=*/false),
+                  meta(1000 + i * 100));
+        c.observe(dataDown(0x5555, static_cast<uint16_t>(i), /*adr=*/true),
+                  meta(1050 + i * 100));
+    }
+
+    const DeviceRecord& r = c.at(0);
+    TEST_ASSERT_EQUAL_UINT32(0, r.adrSetCount);
+    TEST_ASSERT_EQUAL_UINT32(8, r.adrClearCount);
+    TEST_ASSERT_TRUE(assess(r, fullCoverageContext()).findings.has(FindingId::AdrDisabled));
+}
+
+void test_confirmed_ratio_measured_against_uplinks() {
+    // Every uplink confirmed, and the network answers each one. Counting
+    // downlinks in the denominator halves the ratio to 50% and silently loses
+    // the finding.
+    Census c;
+    for (int i = 0; i < 10; i++) {
+        c.observe(dataUp(0x6666, static_cast<uint16_t>(i), true, /*confirmed=*/true),
+                  meta(1000 + i * 100));
+        c.observe(dataDown(0x6666, static_cast<uint16_t>(i)), meta(1050 + i * 100));
+    }
+
+    const DeviceRecord& r = c.at(0);
+    TEST_ASSERT_EQUAL_UINT32(10, r.confirmedUplinkCount);
+    TEST_ASSERT_EQUAL_UINT32(10, r.uplinkCount);
+    TEST_ASSERT_EQUAL_UINT32(10, r.downlinkCount);
+    TEST_ASSERT_TRUE(
+        assess(r, fullCoverageContext()).findings.has(FindingId::ConfirmedUplinkHeavy));
+}
+
+// ---- regression: do not describe our own tuning as the device's behaviour ---
+
+void test_stuck_high_sf_not_claimed_when_only_one_sf_swept() {
+    // Parked on SF12, EVERY device we are physically able to hear is at SF12.
+    // Reporting that as a property of the device describes our own radio.
+    DeviceRecord d;
+    d.kind = DeviceKind::Session;
+    d.framesSeen  = 20;
+    d.uplinkCount = 20;
+    d.adrSetCount = 20;
+    d.sfMin = 12;
+    d.sfMax = 12;
+
+    CaptureContext parked = fullCoverageContext();
+    parked.sfCovered = 1;  // swept every channel, but only one spreading factor
+    TEST_ASSERT_FALSE(parked.canJudgeSpreadingFactor());
+    TEST_ASSERT_FALSE(assess(d, parked).findings.has(FindingId::StuckHighSF));
+
+    // Having actually swept the spreading factors, the claim becomes earnable.
+    TEST_ASSERT_TRUE(
+        assess(d, fullCoverageContext()).findings.has(FindingId::StuckHighSF));
+}
+
+// ---- regression: a full table must not look like a dead band ----------------
+
+void test_frames_observed_keeps_counting_when_table_is_full() {
+    Census c;
+    for (uint32_t i = 0; i < Census::kMaxDevices + 25; i++)
+        c.observe(dataUp(0x10000 + i, 1), meta(1000 + i));
+
+    TEST_ASSERT_TRUE(c.full());
+    TEST_ASSERT_EQUAL_UINT32(Census::kMaxDevices, c.size());
+    TEST_ASSERT_EQUAL_UINT32(25, c.framesDropped());
+    // Every frame was heard, including the ones with nowhere to go.
+    TEST_ASSERT_EQUAL_UINT32(Census::kMaxDevices + 25, c.framesObserved());
+}
+
+void test_untrackable_frames_still_counted_as_traffic() {
+    Census c;
+    Frame ja;
+    ja.mtype = MType::JoinAccept;
+    ja.major = 0;
+    c.observe(ja, meta(1000));
+    TEST_ASSERT_EQUAL_UINT32(0, c.size());
+    TEST_ASSERT_EQUAL_UINT32(1, c.framesObserved());
+}
+
 void test_grade_is_provisional_when_coverage_is_thin() {
     // 52 clean frames is real evidence, so the grade is high -- but we heard
     // 2% of the band, and an A+ stated flatly would overclaim.
@@ -486,6 +626,14 @@ int main(int, char**) {
     RUN_TEST(test_adr_disabled_needs_enough_frames);
     RUN_TEST(test_devnonce_reuse_graded_high);
     RUN_TEST(test_clean_device_can_still_reach_top_grade);
+
+    RUN_TEST(test_healthy_bidirectional_traffic_produces_no_findings);
+    RUN_TEST(test_downlink_counter_judged_on_its_own_track);
+    RUN_TEST(test_adr_is_counted_on_uplinks_only);
+    RUN_TEST(test_confirmed_ratio_measured_against_uplinks);
+    RUN_TEST(test_stuck_high_sf_not_claimed_when_only_one_sf_swept);
+    RUN_TEST(test_frames_observed_keeps_counting_when_table_is_full);
+    RUN_TEST(test_untrackable_frames_still_counted_as_traffic);
 
     RUN_TEST(test_grade_is_provisional_when_coverage_is_thin);
     RUN_TEST(test_grade_is_provisional_on_too_few_frames);

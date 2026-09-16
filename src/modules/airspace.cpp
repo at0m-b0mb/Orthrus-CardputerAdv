@@ -31,7 +31,7 @@ constexpr char kKeyBack = '`';
 constexpr int kBodyTop    = 21;
 constexpr int kCensusRowH = 14;
 constexpr int kCensusRows = 6;
-constexpr int kGridX      = 180;
+constexpr int kGridX      = 168;
 constexpr int kGridY      = 26;
 
 uint8_t popcount64(uint64_t v) {
@@ -47,8 +47,14 @@ uint8_t popcount64(uint64_t v) {
 
 bool Airspace::begin() {
     if (!radio_.begin()) return false;
-    startedMs_ = millis();
-    lastHopMs_ = startedMs_;
+
+    // Re-entering the module must not reset the clock, or every return trip
+    // would make a long capture look like it had only just started -- and
+    // listenedMs feeds the confidence given to absence-based findings.
+    if (startedMs_ == 0) {
+        startedMs_ = millis();
+        lastHopMs_ = startedMs_;
+    }
     retune();
     return radio_.listen();
 }
@@ -140,11 +146,10 @@ void Airspace::pump() {
 }
 
 void Airspace::drawLive() {
-    auto& d = M5Cardputer.Display;
+    ui::beginFrame();
+    auto& d = ui::gfx();
     const lw::ChannelPlan& p = lw::plan(region_);
     const lw::CaptureContext ctx = context();
-
-    d.fillScreen(kInk);
 
     char right[20];
     std::snprintf(right, sizeof(right), "%s %s", p.name, hopping_ ? "HOP" : "PARK");
@@ -179,22 +184,33 @@ void Airspace::drawLive() {
         ui::textAt(6, kBodyTop + 82, kBrass, "%s", lastLine_);
     }
 
-    // The coverage grid, and the number it stands for.
-    const uint8_t cols = static_cast<uint8_t>(p.uplinkCount > 8 ? 8 : p.uplinkCount);
-    ui::coverageGrid(kGridX, kGridY, cols, p.sfCount(),
-                     chIndex_ < cols ? chIndex_ : 0, sfIndex_);
+    // The coverage grid. Columns are the channels we actually sweep, which for
+    // US915 is a 16-channel window of a 64-channel band -- so the grid is
+    // labelled with both numbers and the percentage is computed against the
+    // real band, not the window. Lighting cell 0 while parked on channel 10,
+    // which the old fixed 8-column grid did, was simply a lie.
+    const uint8_t sweep = lw::sweepableChannels(region_);
+    const int gridBottom =
+        ui::coverageGrid(kGridX, kGridY, sweep, p.sfCount(), chIndex_, sfIndex_,
+                         bd::kScreenW - kGridX - 4);
 
-    const int gridBottom = kGridY + p.sfCount() * 5;
-    ui::textAt(kGridX, gridBottom + 9, kText, "%u%% heard",
+    ui::textAt(kGridX, gridBottom + 8, kText, "%u%% heard",
                static_cast<unsigned>(ctx.coveragePercent()));
-    ui::textAt(kGridX, gridBottom + 21, kFaint, "of band");
+    if (sweep < p.uplinkCount) {
+        ui::textAt(kGridX, gridBottom + 19, kFaint, "%u of %u ch",
+                   static_cast<unsigned>(sweep),
+                   static_cast<unsigned>(p.uplinkCount));
+    } else {
+        ui::textAt(kGridX, gridBottom + 19, kFaint, "of band");
+    }
 
     ui::footer("enter census   h hop   s sf   ` back");
+    ui::endFrame();
 }
 
 void Airspace::drawCensus() {
-    auto& d = M5Cardputer.Display;
-    d.fillScreen(kInk);
+    ui::beginFrame();
+    auto& d = ui::gfx();
 
     char right[16];
     std::snprintf(right, sizeof(right), "%u seen", static_cast<unsigned>(census_.size()));
@@ -210,6 +226,7 @@ void Airspace::drawCensus() {
         d.drawString("and one radio hears one channel", 8, kBodyTop + 40);
         d.drawString("at a time. Hopping widens it.", 8, kBodyTop + 52);
         ui::footer("` back");
+        ui::endFrame();
         return;
     }
 
@@ -263,19 +280,19 @@ void Airspace::drawCensus() {
     }
 
     d.setTextDatum(top_left);
-    ui::footer("enter dossier   ; . move   ` back");
+    ui::footer("enter open  ; . move  c clear  ` back");
+    ui::endFrame();
 }
 
 void Airspace::drawDossier() {
-    auto& d = M5Cardputer.Display;
-
     if (census_.size() == 0) {
         view_ = View::Census;
         return;
     }
     if (selected_ >= static_cast<int>(census_.size())) selected_ = 0;
 
-    d.fillScreen(kInk);
+    ui::beginFrame();
+    auto& d = ui::gfx();
 
     const lw::DeviceRecord& rec = census_.at(static_cast<size_t>(selected_));
     const lw::CaptureContext ctx = context();
@@ -347,6 +364,7 @@ void Airspace::drawDossier() {
 
     d.setTextDatum(top_left);
     ui::footer("; . device   ` back");
+    ui::endFrame();
 }
 
 bool Airspace::handleKeys() {
@@ -382,6 +400,23 @@ bool Airspace::handleKeys() {
                 lastHopMs_ = millis();
                 return true;
 
+            case 'c':
+                // Start a fresh capture. A survey tool with no way to clear the
+                // table forces an operator to power-cycle between sites, which
+                // also loses the coverage they had built up.
+                if (view_ == View::Census) {
+                    census_.reset();
+                    selected_        = 0;
+                    scroll_          = 0;
+                    parseFailures_   = 0;
+                    startedMs_       = millis();
+                    lastLine_[0]     = '\0';
+                    visitedChannels_ = 0;
+                    visitedSfs_      = 0;
+                    retune();  // re-mark the channel we are actually on
+                }
+                return true;
+
             case 's': {
                 // Stepping the spreading factor widens coverage but costs dwell
                 // time on each -- the real trade the operator is making.
@@ -398,6 +433,12 @@ bool Airspace::handleKeys() {
                 sfIndex_ = 0;
                 visitedChannels_ = 0;
                 visitedSfs_      = 0;
+                // Devices heard under the old plan cannot be graded against the
+                // new plan's coverage, so the capture starts over with it.
+                census_.reset();
+                selected_ = 0;
+                scroll_   = 0;
+                startedMs_ = millis();
                 retune();
                 return true;
 
@@ -413,7 +454,10 @@ void Airspace::run() {
         M5Cardputer.update();
         pump();
 
-        if (!handleKeys()) return;
+        if (!handleKeys()) {
+            radio_.idle();  // do not leave the receiver running behind us
+            return;
+        }
 
         if (millis() - lastDrawMs_ >= kRedrawMs) {
             lastDrawMs_ = millis();
