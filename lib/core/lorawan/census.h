@@ -130,10 +130,17 @@ struct CaptureContext {
     bool canJudgeSpreadingFactor() const { return sfCovered > 1; }
 };
 
+// NEVER declare a Census as a local variable on an embedded target.
+//
+// It is roughly 17 KB. The Arduino loopTask stack on ESP32 is 8 KB, so a local
+// Census overflows the stack the moment it is constructed -- no warning, just a
+// reboot loop. This is not hypothetical: the first run of the on-device
+// self-test did exactly that. Give it static storage, or a member of an object
+// that has static storage.
 class Census {
 public:
-    // 128 records is about 17 KB -- affordable, and more devices than a single
-    // channel/SF will realistically surface in one session.
+    // 128 records is about 17 KB -- affordable in static storage, and more
+    // devices than a single channel/SF will realistically surface in a session.
     static constexpr size_t kMaxDevices = 128;
 
     void reset();
