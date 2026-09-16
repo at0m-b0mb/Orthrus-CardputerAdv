@@ -24,6 +24,8 @@
 #include "lorawan/payload.h"
 #include "lorawan/phy.h"
 #include "lorawan/region.h"
+#include "hal/lora_radio.h"
+#include "modules/spectrum.h"
 
 namespace bd = orthrus::board;
 using namespace orthrus::lorawan;
@@ -229,6 +231,62 @@ void testRadioParamChanges() {
 }
 
 // ---------------------------------------------------------------------------
+// 2b. The Spectrum class, driven against the real radio.
+//
+// The raw sweep above proves the synthesiser moves. This proves the object the
+// UI actually uses produces the same structure, keeps a sane max-hold, and
+// wraps its cursor correctly.
+// ---------------------------------------------------------------------------
+
+void testSpectrumSweep() {
+    banner("spectrum sweep object");
+    if (!g_radioUp) { Serial.println("  [skip] radio not up"); return; }
+
+    // Borrow the product's own radio wrapper so this exercises the same path.
+    static orthrus::hal::LoraRadio radio;
+    check(radio.begin(), "LoraRadio begin");
+    if (!radio.ready()) return;
+
+    static orthrus::modules::Spectrum spec;
+    spec.configure(863000000, 870000000);
+    spec.reset();
+
+    const uint32_t t0 = millis();
+    int guard = 0;
+    while (spec.sweeps() == 0 && guard++ < 4000) spec.step(radio, 4);
+    const uint32_t elapsed = millis() - t0;
+
+    check(spec.sweeps() >= 1, "completed a full sweep");
+    Serial.printf("  [info] full sweep in %lu ms over %d bins\n",
+                  static_cast<unsigned long>(elapsed),
+                  orthrus::modules::Spectrum::kBins);
+
+    int lo = 127, hi = -128;
+    for (int i = 0; i < orthrus::modules::Spectrum::kBins; i++) {
+        const int v = spec.level(i);
+        if (v < lo) lo = v;
+        if (v > hi) hi = v;
+        // Max-hold can never sit below the live trace.
+        if (spec.hold(i) < spec.level(i)) {
+            check(false, "max-hold below live trace");
+            return;
+        }
+    }
+    Serial.printf("  [info] trace %d to %d dBm across the band\n", lo, hi);
+    check(hi > lo, "trace has frequency structure");
+    check(lo >= orthrus::modules::Spectrum::kFloorDbm &&
+          hi <= orthrus::modules::Spectrum::kCeilingDbm,
+          "levels stay inside the display window");
+
+    const int peak = spec.peakBin();
+    Serial.printf("  [info] peak bin %d at %.2f MHz, %d dBm\n", peak,
+                  spec.binFreqHz(peak) / 1e6, static_cast<int>(spec.hold(peak)));
+    check(spec.binFreqHz(0) == 863000000, "first bin is the start frequency");
+    check(spec.binFreqHz(orthrus::modules::Spectrum::kBins - 1) == 870000000,
+          "last bin is the end frequency");
+}
+
+// ---------------------------------------------------------------------------
 // 3. Shared SPI under load.
 //
 // The radio and the microSD card share SCK, MOSI and MISO. One quiet handshake
@@ -404,6 +462,7 @@ void setup() {
     testRadioBringUp();
     testRadioParamChanges();
     testRadioSweep();
+    testSpectrumSweep();
     testSharedBusStress();
     testHeapSoak();
     testGps();

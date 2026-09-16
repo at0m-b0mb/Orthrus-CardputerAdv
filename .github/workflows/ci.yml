@@ -1,0 +1,108 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  engine-tests:
+    name: engine tests (host)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+      - name: Run host tests
+        run: pio test -e native
+
+  sanitizers:
+    name: parser under ASan and UBSan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fuzz the parser with hostile input
+        run: |
+          mkdir -p build
+          cat > build/fuzz.cpp <<'EOF'
+          #include <cstdint>
+          #include <cstdio>
+          #include <random>
+          #include <vector>
+          #include "lorawan/census.h"
+          #include "lorawan/findings.h"
+          #include "lorawan/payload.h"
+          #include "lorawan/phy.h"
+          using namespace orthrus::lorawan;
+          int main() {
+            std::mt19937 rng(12345);
+            static Census census;
+            CaptureContext ctx; ctx.listenedMs=60000; ctx.channelsCovered=1;
+            ctx.channelsInRegion=8; ctx.sfCovered=1; ctx.sfInRegion=6;
+            for (uint64_t i = 0; i < 400000; i++) {
+              size_t len = (i % 7 == 0) ? (rng() % 300) : (5 + rng() % 40);
+              std::vector<uint8_t> buf(len);
+              for (auto& b : buf) b = uint8_t(rng());
+              if (len > 0 && (i & 1)) buf[0] = uint8_t((rng() % 8) << 5);
+              Frame f;
+              if (parse(buf.data(), buf.size(), f)) {
+                RxMeta m; m.freqHz=868100000; m.sf=7; m.bwKhz=125;
+                m.rssiDbm=-100; m.snrDb=5; m.timeMs=uint32_t(i);
+                census.observe(f, m);
+                if (f.isData() && f.data.frmPayload && f.data.frmPayloadLen)
+                  inspectPayload(f.data.frmPayload, f.data.frmPayloadLen);
+              }
+              if (i % 100000 == 0 && i) {
+                for (size_t k = 0; k < census.size(); k++) assess(census.at(k), ctx);
+                census.reset();
+              }
+            }
+            std::printf("ok\n");
+            return 0;
+          }
+          EOF
+          g++ -std=c++17 -O1 -g -fsanitize=address,undefined \
+              -fno-sanitize-recover=all -I lib/core \
+              build/fuzz.cpp lib/core/lorawan/*.cpp -o build/fuzz
+          ./build/fuzz
+
+  firmware:
+    name: firmware build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+      - name: Build firmware
+        run: pio run -e cardputer-adv
+      - name: Build on-device self-test
+        run: pio run -e selftest
+      - uses: actions/upload-artifact@v4
+        with:
+          name: orthrus-firmware
+          path: .pio/build/cardputer-adv/firmware.bin
+
+  docs-match-engine:
+    name: screenshots match the engine
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rebuild screenshot data from the engine
+        run: |
+          mkdir -p build
+          g++ -std=c++17 -Wall -Wextra -I lib/core \
+              tools/screendump/main.cpp lib/core/lorawan/*.cpp -o build/screendump
+          ./build/screendump > build/screens.json
+          python3 -c "
+          import json
+          d = json.load(open('build/screens.json'))
+          assert d['census'], 'engine produced no devices'
+          print('engine output parses:', len(d['census']), 'devices')
+          "

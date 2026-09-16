@@ -170,6 +170,29 @@ float LoraRadio::instantRssi() {
     return g_radio.getRSSI(false);
 }
 
+float LoraRadio::sampleFloorAt(uint32_t freqHz, int samples) {
+    if (!ready_) return 0.0f;
+
+    // Standby first: the SX1262 latches frequency changes there, and issuing
+    // them mid-receive is how a sweep ends up measuring the same point over and
+    // over while the display claims it is moving.
+    if (g_radio.standby() != RADIOLIB_ERR_NONE) return 0.0f;
+    if (g_radio.setFrequency(static_cast<float>(freqHz) / 1e6f) != RADIOLIB_ERR_NONE)
+        return 0.0f;
+    if (g_radio.startReceive() != RADIOLIB_ERR_NONE) return 0.0f;
+
+    // The AGC needs a moment after a retune; sampling immediately reads the
+    // previous channel.
+    delayMicroseconds(1200);
+
+    float sum = 0.0f;
+    for (int i = 0; i < samples; i++) {
+        sum += g_radio.getRSSI(false);
+        delayMicroseconds(300);
+    }
+    return sum / static_cast<float>(samples);
+}
+
 void LoraRadio::idle() {
     // Leaving the receiver running after the operator has walked away costs
     // real battery on a device whose whole point is being carried.

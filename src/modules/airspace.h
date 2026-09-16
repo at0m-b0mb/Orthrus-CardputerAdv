@@ -18,6 +18,7 @@
 #include "lorawan/census.h"
 #include "lorawan/findings.h"
 #include "lorawan/region.h"
+#include "spectrum.h"
 
 namespace orthrus::modules {
 
@@ -27,7 +28,7 @@ public:
     void run();  // returns when the operator backs out
 
 private:
-    enum class View : uint8_t { Live, Census, Dossier };
+    enum class View : uint8_t { Live, Census, Dossier, Spectrum };
 
     void pump();          // service the radio, fold frames into the census
     void retune();        // apply current channel/SF to the radio
@@ -36,6 +37,7 @@ private:
     void drawLive();
     void drawCensus();
     void drawDossier();
+    void drawSpectrum();
 
     bool handleKeys();    // false = leave the module
 
@@ -44,6 +46,7 @@ private:
     uint8_t coveredSpreadingFactors() const;
 
     hal::LoraRadio    radio_;
+    Spectrum          spectrum_;
     lorawan::Census   census_;
     lorawan::Region   region_ = lorawan::Region::EU868;
 

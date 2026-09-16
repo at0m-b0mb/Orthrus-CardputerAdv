@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="400" viewBox="0 0 1280 400" role="img" aria-label="Orthrus - handheld LoRaWAN security assessment">
+  <defs>
+    <linearGradient id="trace" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#B8893B" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#B8893B" stop-opacity="0.04"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1280" height="400" fill="#000000"/>
+
+  <!-- The real 863-930 MHz sweep this device measured. Not an illustration. -->
+  <path d="M 0.0 400.0 L 0.0 328.0 L 19.1 293.2 L 38.2 340.6 L 57.3 337.6 L 76.4 338.8 L 95.5 334.0 L 114.6 329.2 L 133.7 315.4 L 152.8 319.6 L 171.9 331.6 L 191.0 311.2 L 210.1 338.8 L 229.3 309.4 L 248.4 320.8 L 267.5 328.0 L 286.6 323.2 L 305.7 335.2 L 324.8 322.0 L 343.9 326.8 L 363.0 333.4 L 382.1 324.4 L 401.2 321.4 L 420.3 327.4 L 439.4 319.0 L 458.5 315.4 L 477.6 297.4 L 496.7 316.0 L 515.8 322.0 L 534.9 330.4 L 554.0 332.8 L 573.1 328.0 L 592.2 334.0 L 611.3 332.8 L 630.4 351.4 L 649.6 328.6 L 668.7 334.6 L 687.8 329.2 L 706.9 322.6 L 726.0 332.8 L 745.1 334.0 L 764.2 334.6 L 783.3 328.6 L 802.4 332.8 L 821.5 333.4 L 840.6 320.8 L 859.7 325.6 L 878.8 325.0 L 897.9 326.8 L 917.0 322.0 L 936.1 289.6 L 955.2 327.4 L 974.3 332.8 L 993.4 330.4 L 1012.5 329.2 L 1031.6 325.6 L 1050.7 329.2 L 1069.9 324.4 L 1089.0 323.2 L 1108.1 321.4 L 1127.2 328.0 L 1146.3 307.6 L 1165.4 306.4 L 1184.5 327.4 L 1203.6 323.2 L 1222.7 322.0 L 1241.8 271.6 L 1260.9 324.4 L 1280.0 325.0 L 1280.0 400.0 Z" fill="url(#trace)"/>
+  <path d="M 0.0 328.0 L 19.1 293.2 L 38.2 340.6 L 57.3 337.6 L 76.4 338.8 L 95.5 334.0 L 114.6 329.2 L 133.7 315.4 L 152.8 319.6 L 171.9 331.6 L 191.0 311.2 L 210.1 338.8 L 229.3 309.4 L 248.4 320.8 L 267.5 328.0 L 286.6 323.2 L 305.7 335.2 L 324.8 322.0 L 343.9 326.8 L 363.0 333.4 L 382.1 324.4 L 401.2 321.4 L 420.3 327.4 L 439.4 319.0 L 458.5 315.4 L 477.6 297.4 L 496.7 316.0 L 515.8 322.0 L 534.9 330.4 L 554.0 332.8 L 573.1 328.0 L 592.2 334.0 L 611.3 332.8 L 630.4 351.4 L 649.6 328.6 L 668.7 334.6 L 687.8 329.2 L 706.9 322.6 L 726.0 332.8 L 745.1 334.0 L 764.2 334.6 L 783.3 328.6 L 802.4 332.8 L 821.5 333.4 L 840.6 320.8 L 859.7 325.6 L 878.8 325.0 L 897.9 326.8 L 917.0 322.0 L 936.1 289.6 L 955.2 327.4 L 974.3 332.8 L 993.4 330.4 L 1012.5 329.2 L 1031.6 325.6 L 1050.7 329.2 L 1069.9 324.4 L 1089.0 323.2 L 1108.1 321.4 L 1127.2 328.0 L 1146.3 307.6 L 1165.4 306.4 L 1184.5 327.4 L 1203.6 323.2 L 1222.7 322.0 L 1241.8 271.6 L 1260.9 324.4 L 1280.0 325.0" fill="none" stroke="#E8B44A" stroke-width="1.6" stroke-linejoin="round"/>
+
+  <text x="72" y="150" font-family="Georgia, 'Times New Roman', serif" font-size="94"
+        font-weight="bold" fill="#EDE9E0" letter-spacing="10">ORTHRUS</text>
+
+  <rect x="76" y="176" width="300" height="2" fill="#E8B44A"/>
+
+  <text x="76" y="212" font-family="ui-monospace, Menlo, Consolas, monospace"
+        font-size="21" fill="#B8893B">handheld LoRaWAN security assessment</text>
+  <text x="76" y="242" font-family="ui-monospace, Menlo, Consolas, monospace"
+        font-size="16" fill="#5A5650">M5Stack Cardputer-Adv &#183; SX1262 &#183; authorized testing only</text>
+
+  <!-- Coverage grid: 48 EU868 channel/SF cells, one lit. One radio hears 1 of 48. -->
+  <g transform="translate(1000, 64)">
+    <rect x="0" y="0" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="0" y="12" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="0" y="24" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="0" y="36" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="0" y="48" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="0" y="60" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="12" y="0" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="12" y="12" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="12" y="24" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="12" y="36" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="12" y="48" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="12" y="60" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="24" y="0" width="9" height="9" fill="#E8B44A"/>
+    <rect x="24" y="12" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="24" y="24" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="24" y="36" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="24" y="48" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="24" y="60" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="36" y="0" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="36" y="12" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="36" y="24" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="36" y="36" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="36" y="48" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="36" y="60" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="48" y="0" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="48" y="12" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="48" y="24" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="48" y="36" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="48" y="48" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="48" y="60" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="60" y="0" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="60" y="12" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="60" y="24" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="60" y="36" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="60" y="48" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="60" y="60" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="72" y="0" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="72" y="12" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="72" y="24" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="72" y="36" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="72" y="48" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="72" y="60" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="84" y="0" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="84" y="12" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="84" y="24" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="84" y="36" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="84" y="48" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="84" y="60" width="9" height="9" fill="none" stroke="#33302B" stroke-width="1"/>
+    <text x="0" y="98" font-family="ui-monospace, Menlo, Consolas, monospace"
+          font-size="15" fill="#8A857C">hearing 1 of 48</text>
+  </g>
+</svg>

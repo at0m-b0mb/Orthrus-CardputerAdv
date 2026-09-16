@@ -43,6 +43,14 @@ public:
 
     float instantRssi();
 
+    // Tune somewhere, let the AGC settle, and average the noise floor.
+    //
+    // Used by the spectrum sweep. It leaves the radio tuned where it last
+    // looked, so anything that cares about the capture frequency must retune
+    // afterwards -- which is why entering the spectrum view pauses the capture
+    // rather than pretending both can run at once.
+    float sampleFloorAt(uint32_t freqHz, int samples = 6);
+
     // Drop the receiver to standby. Called when the operator leaves the module.
     void idle();
 

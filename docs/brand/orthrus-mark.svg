@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Orthrus mark">
+  <rect width="512" height="512" rx="96" fill="#000000"/>
+  <rect x="8" y="8" width="496" height="496" rx="88" fill="none" stroke="#33302B" stroke-width="2"/>
+  <g transform="translate(104, 150)">
+    <rect x="0" y="0" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="0" y="38" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="0" y="76" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="0" y="114" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="0" y="152" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="0" y="190" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="38" y="0" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="38" y="38" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="38" y="76" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="38" y="114" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="38" y="152" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="38" y="190" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="76" y="0" width="26" height="26" fill="#E8B44A"/>
+    <rect x="76" y="38" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="76" y="76" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="76" y="114" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="76" y="152" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="76" y="190" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="114" y="0" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="114" y="38" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="114" y="76" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="114" y="114" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="114" y="152" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="114" y="190" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="152" y="0" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="152" y="38" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="152" y="76" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="152" y="114" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="152" y="152" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="152" y="190" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="190" y="0" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="190" y="38" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="190" y="76" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="190" y="114" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="190" y="152" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="190" y="190" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="228" y="0" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="228" y="38" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="228" y="76" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="228" y="114" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="228" y="152" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="228" y="190" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="266" y="0" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="266" y="38" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="266" y="76" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="266" y="114" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="266" y="152" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+    <rect x="266" y="190" width="26" height="26" fill="none" stroke="#33302B" stroke-width="1"/>
+  </g>
+  <text x="256.0" y="430" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif"
+        font-size="58" font-weight="bold" fill="#EDE9E0" letter-spacing="4">ORTHRUS</text>
+</svg>

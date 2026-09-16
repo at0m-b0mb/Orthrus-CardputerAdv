@@ -31,11 +31,11 @@ constexpr uint32_t kAs923[] = {
 };
 
 constexpr ChannelPlan kPlans[] = {
-    {Region::EU868, "EU868", kEu868, 8,  7, 12, 125, true},
+    {Region::EU868, "EU868", kEu868, 8,  7, 12, 125, true, 863000000, 870000000},
     // US915's real uplink space is 64 channels; we sweep a window of it.
-    {Region::US915, "US915", kUs915, 64, 7, 10, 125, true},
-    {Region::AU915, "AU915", kAu915, 64, 7, 12, 125, true},
-    {Region::AS923, "AS923", kAs923, 8,  7, 12, 125, true},
+    {Region::US915, "US915", kUs915, 64, 7, 10, 125, true, 902000000, 928000000},
+    {Region::AU915, "AU915", kAu915, 64, 7, 12, 125, true, 915000000, 928000000},
+    {Region::AS923, "AS923", kAs923, 8,  7, 12, 125, true, 920000000, 925000000},
 };
 
 // The tables above are shorter than `uplinkCount` for the 64-channel regions,

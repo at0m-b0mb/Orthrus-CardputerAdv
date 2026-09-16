@@ -29,6 +29,12 @@ struct ChannelPlan {
     uint16_t        defaultBwKhz;
     bool            legalToTransmit;  // duty-cycle / LBT regimes differ wildly
 
+    // Range the spectrum view sweeps. Wider than the uplink channels on
+    // purpose: the point of a sweep is to show what is there, including
+    // whatever is sitting next to the band you came to look at.
+    uint32_t        spectrumStartHz;
+    uint32_t        spectrumEndHz;
+
     uint8_t sfCount() const {
         return static_cast<uint8_t>(sfMax >= sfMin ? sfMax - sfMin + 1 : 0);
     }

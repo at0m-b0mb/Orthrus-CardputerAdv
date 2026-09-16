@@ -204,7 +204,7 @@ void Airspace::drawLive() {
         ui::textAt(kGridX, gridBottom + 19, kFaint, "of band");
     }
 
-    ui::footer("enter census   h hop   s sf   ` back");
+    ui::footer("enter list  h hop  s sf  x sweep  ` back");
     ui::endFrame();
 }
 
@@ -367,6 +367,40 @@ void Airspace::drawDossier() {
     ui::endFrame();
 }
 
+void Airspace::drawSpectrum() {
+    ui::beginFrame();
+    const lw::ChannelPlan& p = lw::plan(region_);
+
+    char right[20];
+    std::snprintf(right, sizeof(right), "%s sweep %lu", p.name,
+                  static_cast<unsigned long>(spectrum_.sweeps()));
+    ui::chrome("Spectrum", right);
+
+    constexpr int kGraphX = 4, kGraphY = 22, kGraphH = 68;
+    const int graphW = Spectrum::kBins * 2;
+    spectrum_.draw(kGraphX, kGraphY, graphW, kGraphH);
+
+    // Axis ends, so the trace means something without counting pixels.
+    ui::textAt(kGraphX, kGraphY + kGraphH + 9, kFaint, "%.0f",
+               spectrum_.startHz() / 1e6);
+    ui::textRight(kGraphX + graphW, kGraphY + kGraphH + 9, kFaint, "%.0f MHz",
+                  spectrum_.endHz() / 1e6);
+
+    if (spectrum_.hasData()) {
+        const int peak = spectrum_.peakBin();
+        ui::textAt(kGraphX, kGraphY + kGraphH + 22, kShine, "peak %.2f MHz  %d dBm",
+                   spectrum_.binFreqHz(peak) / 1e6,
+                   static_cast<int>(spectrum_.hold(peak)));
+    } else {
+        ui::textAt(kGraphX, kGraphY + kGraphH + 22, kMuted, "sweeping...");
+    }
+
+    // The radio cannot listen for frames and sweep at the same time. Saying so
+    // is better than letting an operator believe the capture is still running.
+    ui::footer("capture paused   m max-hold   ` back");
+    ui::endFrame();
+}
+
 bool Airspace::handleKeys() {
     if (!M5Cardputer.Keyboard.isChange() || !M5Cardputer.Keyboard.isPressed())
         return true;
@@ -384,7 +418,11 @@ bool Airspace::handleKeys() {
             case kKeyBack:
                 if (view_ == View::Dossier) view_ = View::Census;
                 else if (view_ == View::Census) view_ = View::Live;
-                else return false;  // leave the module
+                else if (view_ == View::Spectrum) {
+                    // The sweep left the radio wherever it last looked.
+                    view_ = View::Live;
+                    retune();
+                } else return false;  // leave the module
                 return true;
 
             case kKeyUp:
@@ -393,6 +431,17 @@ bool Airspace::handleKeys() {
 
             case kKeyDown:
                 if (selected_ + 1 < static_cast<int>(census_.size())) selected_++;
+                return true;
+
+            case 'x': {
+                const lw::ChannelPlan& p = lw::plan(region_);
+                spectrum_.configure(p.spectrumStartHz, p.spectrumEndHz);
+                view_ = View::Spectrum;
+                return true;
+            }
+
+            case 'm':
+                if (view_ == View::Spectrum) spectrum_.reset();
                 return true;
 
             case 'h':
@@ -452,7 +501,11 @@ bool Airspace::handleKeys() {
 void Airspace::run() {
     for (;;) {
         M5Cardputer.update();
-        pump();
+
+        // The radio serves exactly one job at a time. Sweeping retunes it away
+        // from the capture channel, so the two cannot overlap.
+        if (view_ == View::Spectrum) spectrum_.step(radio_);
+        else                         pump();
 
         if (!handleKeys()) {
             radio_.idle();  // do not leave the receiver running behind us
@@ -465,6 +518,7 @@ void Airspace::run() {
                 case View::Live:    drawLive();    break;
                 case View::Census:  drawCensus();  break;
                 case View::Dossier: drawDossier(); break;
+                case View::Spectrum: drawSpectrum(); break;
             }
         }
         delay(2);
