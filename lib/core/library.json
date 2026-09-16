@@ -1,0 +1,10 @@
+{
+  "name": "orthrus-core",
+  "version": "0.1.0",
+  "description": "Pure, host-testable engines for Orthrus. No Arduino, no I/O, no allocation.",
+  "build": {
+    "srcDir": ".",
+    "srcFilter": ["+<**/*.cpp>"],
+    "flags": ["-I."]
+  }
+}
