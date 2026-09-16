@@ -167,7 +167,7 @@ def render_census(d, selected=0):
         if r.get("provisional"):
             text(dr, (W - 6, mid), "*", F_DATA, FAINT, anchor="rm")
 
-    footer(dr, "enter dossier   ; . move   ` back")
+    footer(dr, "enter open  ; . move  c clear  ` back")
     return img
 
 
