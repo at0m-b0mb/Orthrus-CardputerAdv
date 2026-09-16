@@ -394,6 +394,36 @@ void test_clean_device_can_still_reach_top_grade() {
     TEST_ASSERT_EQUAL(static_cast<int>(Grade::APlus), static_cast<int>(a.grade));
 }
 
+void test_grade_is_provisional_when_coverage_is_thin() {
+    // 52 clean frames is real evidence, so the grade is high -- but we heard
+    // 2% of the band, and an A+ stated flatly would overclaim.
+    DeviceRecord d;
+    d.kind = DeviceKind::Session;
+    d.framesSeen  = 52;
+    d.adrSetCount = 52;
+
+    const auto thin = assess(d, oneRadioContext());
+    TEST_ASSERT_EQUAL(static_cast<int>(Grade::APlus), static_cast<int>(thin.grade));
+    TEST_ASSERT_TRUE(thin.provisional);
+
+    const auto full = assess(d, fullCoverageContext());
+    TEST_ASSERT_FALSE(full.provisional);
+}
+
+void test_grade_is_provisional_on_too_few_frames() {
+    DeviceRecord d;
+    d.kind = DeviceKind::Session;
+    d.framesSeen  = 3;
+    d.adrSetCount = 3;
+    TEST_ASSERT_TRUE(assess(d, fullCoverageContext()).provisional);
+}
+
+void test_info_findings_carry_no_confidence() {
+    TEST_ASSERT_FALSE(findingCarriesConfidence(Severity::Info));
+    TEST_ASSERT_TRUE(findingCarriesConfidence(Severity::Low));
+    TEST_ASSERT_TRUE(findingCarriesConfidence(Severity::Critical));
+}
+
 void test_every_finding_has_text() {
     for (int i = 0; i <= static_cast<int>(FindingId::CoverageTooLow); i++) {
         const auto id = static_cast<FindingId>(i);
@@ -456,6 +486,10 @@ int main(int, char**) {
     RUN_TEST(test_adr_disabled_needs_enough_frames);
     RUN_TEST(test_devnonce_reuse_graded_high);
     RUN_TEST(test_clean_device_can_still_reach_top_grade);
+
+    RUN_TEST(test_grade_is_provisional_when_coverage_is_thin);
+    RUN_TEST(test_grade_is_provisional_on_too_few_frames);
+    RUN_TEST(test_info_findings_carry_no_confidence);
 
     RUN_TEST(test_every_finding_has_text);
     RUN_TEST(test_finding_set_respects_its_bound);

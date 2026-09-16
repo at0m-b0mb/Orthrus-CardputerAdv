@@ -18,14 +18,21 @@ namespace lw = orthrus::lorawan;
 
 namespace {
 
-constexpr size_t   kMaxPhyLen   = 256;
-constexpr uint32_t kRedrawMs    = 150;
+constexpr size_t   kMaxPhyLen = 256;
+constexpr uint32_t kRedrawMs  = 180;
 
-// Cardputer has no arrow cluster; these are the keys everything on this board
-// uses for navigation.
+// Cardputer has no arrow cluster; these are the keys every project on this
+// board uses for navigation.
 constexpr char kKeyUp   = ';';
 constexpr char kKeyDown = '.';
 constexpr char kKeyBack = '`';
+
+// Layout, written down once. See main.cpp for why.
+constexpr int kBodyTop    = 21;
+constexpr int kCensusRowH = 14;
+constexpr int kCensusRows = 6;
+constexpr int kGridX      = 180;
+constexpr int kGridY      = 26;
 
 uint8_t popcount64(uint64_t v) {
     uint8_t n = 0;
@@ -86,8 +93,8 @@ lw::CaptureContext Airspace::context() const {
     lw::CaptureContext c;
     c.listenedMs       = millis() - startedMs_;
     c.channelsCovered  = coveredChannels();
-    // Coverage is measured against the real band, not the window we sweep, so
-    // US915 is honestly reported as the much worse case it is.
+    // Measured against the real band, not the window we sweep, so US915 is
+    // honestly reported as the much worse case it is.
     c.channelsInRegion = p.uplinkCount;
     c.sfCovered        = coveredSpreadingFactors();
     c.sfInRegion       = p.sfCount();
@@ -106,7 +113,7 @@ void Airspace::pump() {
             lastFrameMs_ = millis();
 
             if (f.mtype == lw::MType::JoinRequest) {
-                std::snprintf(lastLine_, sizeof(lastLine_), "JOIN %02X%02X%02X%02X %d",
+                std::snprintf(lastLine_, sizeof(lastLine_), "JOIN %02X%02X%02X%02X %ddBm",
                               f.join.devEui[4], f.join.devEui[5], f.join.devEui[6],
                               f.join.devEui[7], meta.rssiDbm);
             } else if (f.isData()) {
@@ -119,11 +126,10 @@ void Airspace::pump() {
             }
         } else {
             // A LoRa frame with a valid CRC that is not LoRaWAN. Counted, not
-            // hidden: on a busy site this is how you notice a proprietary
+            // hidden: on a live site this is how you notice a proprietary
             // network sharing the band.
             parseFailures_++;
-            std::snprintf(lastLine_, sizeof(lastLine_), "non-LoRaWAN (%s)",
-                          lw::errorName(f.error));
+            std::snprintf(lastLine_, sizeof(lastLine_), "non-LoRaWAN frame");
         }
     }
 
@@ -140,53 +146,48 @@ void Airspace::drawLive() {
 
     d.fillScreen(kInk);
 
-    char right[24];
+    char right[20];
     std::snprintf(right, sizeof(right), "%s %s", p.name, hopping_ ? "HOP" : "PARK");
     ui::chrome("Airspace", right);
 
-    // Left column: what we are tuned to and what has arrived.
     d.setFont(kFaceData);
-    int y = kHeaderH + 3;
 
-    d.setTextColor(kBrass, kInk);
-    d.setCursor(kPad, y);
-    d.printf("%.3f MHz  SF%u", p.uplinkHz[chIndex_] / 1e6,
-             static_cast<unsigned>(p.sfMin + sfIndex_));
-    y += 11;
+    // Tuning, in the accent: it is the one thing that changes as you hop.
+    char tune[32];
+    std::snprintf(tune, sizeof(tune), "%.3f MHz   SF%u", p.uplinkHz[chIndex_] / 1e6,
+                  static_cast<unsigned>(p.sfMin + sfIndex_));
+    ui::textAt(6, kBodyTop + 5, kShine, "%s", tune);
 
-    d.setTextColor(kText, kInk);
-    d.setCursor(kPad, y);
-    d.printf("devices  %u", static_cast<unsigned>(census_.size()));
-    y += 9;
-    d.setCursor(kPad, y);
-    d.printf("frames   %u", static_cast<unsigned>(census_.framesObserved()));
-    y += 9;
+    // Counters. Devices and frames are what you came for; the error counts are
+    // what stop an empty list being mistaken for a quiet band.
+    ui::textAt(6, kBodyTop + 24, kMuted, "devices");
+    ui::textRight(96, kBodyTop + 24, kText, "%u", static_cast<unsigned>(census_.size()));
 
-    d.setTextColor(kMuted, kInk);
-    d.setCursor(kPad, y);
-    d.printf("crc err  %u", static_cast<unsigned>(radio_.stats().crcErrors));
-    y += 9;
-    d.setCursor(kPad, y);
-    d.printf("other rf %u", static_cast<unsigned>(parseFailures_));
-    y += 11;
+    ui::textAt(6, kBodyTop + 37, kMuted, "frames");
+    ui::textRight(96, kBodyTop + 37, kText, "%u",
+                  static_cast<unsigned>(census_.framesObserved()));
 
-    // Most recent decode, in the accent so the eye finds it.
+    ui::textAt(6, kBodyTop + 50, kMuted, "crc fail");
+    ui::textRight(96, kBodyTop + 50, kFaint, "%u",
+                  static_cast<unsigned>(radio_.stats().crcErrors));
+
+    ui::textAt(6, kBodyTop + 63, kMuted, "other rf");
+    ui::textRight(96, kBodyTop + 63, kFaint, "%u",
+                  static_cast<unsigned>(parseFailures_));
+
     if (lastLine_[0] != '\0') {
-        d.setTextColor(kShine, kInk);
-        d.setCursor(kPad, y);
-        d.print(lastLine_);
+        ui::textAt(6, kBodyTop + 82, kBrass, "%s", lastLine_);
     }
 
-    // Right column: the coverage grid. This is the honest bit.
-    const int gridX = 168;
-    const int gridY = kHeaderH + 6;
-    ui::coverageGrid(gridX, gridY, static_cast<uint8_t>(p.uplinkCount > 8 ? 8 : p.uplinkCount),
-                     p.sfCount(), chIndex_ < 8 ? chIndex_ : 0, sfIndex_);
+    // The coverage grid, and the number it stands for.
+    const uint8_t cols = static_cast<uint8_t>(p.uplinkCount > 8 ? 8 : p.uplinkCount);
+    ui::coverageGrid(kGridX, kGridY, cols, p.sfCount(),
+                     chIndex_ < cols ? chIndex_ : 0, sfIndex_);
 
-    d.setFont(kFaceData);
-    d.setTextColor(kMuted, kInk);
-    d.setCursor(gridX, gridY + p.sfCount() * 5 + 12);
-    d.printf("heard %u%%", static_cast<unsigned>(ctx.coveragePercent()));
+    const int gridBottom = kGridY + p.sfCount() * 5;
+    ui::textAt(kGridX, gridBottom + 9, kText, "%u%% heard",
+               static_cast<unsigned>(ctx.coveragePercent()));
+    ui::textAt(kGridX, gridBottom + 21, kFaint, "of band");
 
     ui::footer("enter census   h hop   s sf   ` back");
 }
@@ -195,69 +196,78 @@ void Airspace::drawCensus() {
     auto& d = M5Cardputer.Display;
     d.fillScreen(kInk);
 
-    char right[24];
-    std::snprintf(right, sizeof(right), "%u seen",
-                  static_cast<unsigned>(census_.size()));
+    char right[16];
+    std::snprintf(right, sizeof(right), "%u seen", static_cast<unsigned>(census_.size()));
     ui::chrome("Census", right);
-
-    const lw::CaptureContext ctx = context();
-    const int rows = 7;
-    const int top  = kHeaderH + 2;
 
     if (census_.size() == 0) {
         d.setFont(kFaceData);
+        d.setTextDatum(top_left);
         d.setTextColor(kMuted, kInk);
-        d.setCursor(kPad, top + 8);
-        d.print("nothing heard yet.");
-        d.setCursor(kPad, top + 20);
-        d.print("hopping widens coverage;");
-        d.setCursor(kPad, top + 29);
-        d.print("uplinks can be minutes apart.");
+        d.drawString("Nothing heard yet.", 8, kBodyTop + 8);
+        d.setTextColor(kFaint, kInk);
+        d.drawString("Uplinks can be minutes apart,", 8, kBodyTop + 28);
+        d.drawString("and one radio hears one channel", 8, kBodyTop + 40);
+        d.drawString("at a time. Hopping widens it.", 8, kBodyTop + 52);
         ui::footer("` back");
         return;
     }
 
-    if (selected_ < scroll_) scroll_ = selected_;
-    if (selected_ >= scroll_ + rows) scroll_ = selected_ - rows + 1;
+    const lw::CaptureContext ctx = context();
 
-    d.setFont(kFaceData);
-    for (int i = 0; i < rows; i++) {
+    if (selected_ < scroll_) scroll_ = selected_;
+    if (selected_ >= scroll_ + kCensusRows) scroll_ = selected_ - kCensusRows + 1;
+
+    for (int i = 0; i < kCensusRows; i++) {
         const int idx = scroll_ + i;
         if (idx >= static_cast<int>(census_.size())) break;
 
         const lw::DeviceRecord& rec = census_.at(static_cast<size_t>(idx));
         const auto a = lw::assess(rec, ctx);
-        const int y = top + i * 13;
 
-        if (idx == selected_) {
-            d.fillRect(0, y - 1, bd::kScreenW, 12, kSurface);
-            d.drawFastVLine(0, y - 1, 12, kShine);
-        }
+        const int y   = kBodyTop + i * kCensusRowH;
+        const int mid = y + kCensusRowH / 2;
+        const bool sel = (idx == selected_);
+        ui::listRow(y, kCensusRowH, sel);
 
-        d.setTextColor(kText, idx == selected_ ? kSurface : kInk);
-        d.setCursor(kPad + 2, y + 1);
+        const uint16_t bg = sel ? kSurface : kInk;
+        d.setFont(kFaceData);
+
+        char label[16];
         if (rec.kind == lw::DeviceKind::Session) {
-            d.printf("%08lX", static_cast<unsigned long>(rec.devAddr));
+            std::snprintf(label, sizeof(label), "%08lX",
+                          static_cast<unsigned long>(rec.devAddr));
         } else {
-            d.printf("%02X%02X%02X%02X*", rec.devEui[4], rec.devEui[5],
-                     rec.devEui[6], rec.devEui[7]);
+            std::snprintf(label, sizeof(label), "%02X%02X%02X%02X*", rec.devEui[4],
+                          rec.devEui[5], rec.devEui[6], rec.devEui[7]);
         }
 
-        d.setTextColor(kMuted, idx == selected_ ? kSurface : kInk);
-        d.setCursor(kPad + 60, y + 1);
-        d.printf("%3ddBm %2u", rec.bestRssiDbm, static_cast<unsigned>(rec.framesSeen));
+        d.setTextDatum(middle_left);
+        d.setTextColor(kText, bg);
+        d.drawString(label, 8, mid);
 
-        d.setTextColor(ui::gradeColour(a.grade), idx == selected_ ? kSurface : kInk);
-        d.setCursor(bd::kScreenW - 22, y + 1);
-        d.print(lw::gradeName(a.grade));
+        d.setTextColor(kMuted, bg);
+        char sig[20];
+        std::snprintf(sig, sizeof(sig), "%ddBm  %ufr", rec.bestRssiDbm,
+                      static_cast<unsigned>(rec.framesSeen));
+        d.drawString(sig, 86, mid);
+
+        // Grade flush right, with a marker when the evidence under it is thin.
+        d.setTextDatum(middle_right);
+        d.setTextColor(ui::gradeColour(a.grade), bg);
+        d.drawString(lw::gradeName(a.grade), bd::kScreenW - 16, mid);
+        if (a.provisional) {
+            d.setTextColor(kFaint, bg);
+            d.drawString("*", bd::kScreenW - 6, mid);
+        }
     }
 
+    d.setTextDatum(top_left);
     ui::footer("enter dossier   ; . move   ` back");
 }
 
 void Airspace::drawDossier() {
     auto& d = M5Cardputer.Display;
-    d.fillScreen(kInk);
 
     if (census_.size() == 0) {
         view_ = View::Census;
@@ -265,11 +275,13 @@ void Airspace::drawDossier() {
     }
     if (selected_ >= static_cast<int>(census_.size())) selected_ = 0;
 
+    d.fillScreen(kInk);
+
     const lw::DeviceRecord& rec = census_.at(static_cast<size_t>(selected_));
     const lw::CaptureContext ctx = context();
     const auto a = lw::assess(rec, ctx);
 
-    char title[24];
+    char title[20];
     if (rec.kind == lw::DeviceKind::Session) {
         std::snprintf(title, sizeof(title), "%08lX",
                       static_cast<unsigned long>(rec.devAddr));
@@ -279,42 +291,61 @@ void Airspace::drawDossier() {
     }
     ui::chrome("Dossier", title);
 
-    // Grade, set large in the serif face -- the one moment of identity type.
+    // The grade, set large in the identity face. The one moment of display type
+    // in the whole product, and it earns it.
     d.setFont(kFaceIdentity);
+    d.setTextDatum(middle_left);
     d.setTextColor(ui::gradeColour(a.grade), kInk);
-    d.setCursor(kPad, kHeaderH + 4);
-    d.print(lw::gradeName(a.grade));
+    d.drawString(lw::gradeName(a.grade), 8, kBodyTop + 10);
 
     d.setFont(kFaceData);
-    d.setTextColor(kMuted, kInk);
-    d.setCursor(kPad + 34, kHeaderH + 10);
-    d.printf("%u/100  %u frames", static_cast<unsigned>(a.score),
-             static_cast<unsigned>(rec.framesSeen));
+    ui::textAt(46, kBodyTop + 5, kMuted, "%u/100  %u frames",
+               static_cast<unsigned>(a.score), static_cast<unsigned>(rec.framesSeen));
+    if (a.provisional) {
+        ui::textAt(46, kBodyTop + 16, kFaint, "provisional: %u%% of band",
+                   static_cast<unsigned>(ctx.coveragePercent()));
+    }
 
-    int y = kHeaderH + 26;
+    int y = kBodyTop + 34;
     if (a.findings.count == 0) {
-        d.setTextColor(kGood, kInk);
-        d.setCursor(kPad, y);
-        d.print("nothing adverse observed.");
-        y += 11;
-        d.setTextColor(kFaint, kInk);
-        d.setCursor(kPad, y);
-        d.print("absence of evidence only.");
+        ui::textAt(8, y, kGood, "Nothing adverse observed.");
+        ui::textAt(8, y + 13, kFaint, "Which is not the same as safe.");
     }
 
-    for (uint8_t i = 0; i < a.findings.count && y < bd::kScreenH - kFooterH - 8; i++) {
+    const int listLimit = bd::kScreenH - kFooterH - 40;
+    uint8_t shown = 0;
+    for (uint8_t i = 0; i < a.findings.count && y < listLimit; i++) {
         const lw::Finding& f = a.findings.items[i];
-        d.setTextColor(ui::severityColour(f.sev), kInk);
-        d.setCursor(kPad, y);
-        d.print(lw::findingTitle(f.id));
+        ui::textAt(8, y, ui::severityColour(f.sev), "%s", lw::findingTitle(f.id));
 
-        // Confidence sits right-flush: it is the number that stops this being
-        // an accusation.
-        ui::textRight(bd::kScreenW - kPad, y, kFaint, "%u%%",
-                      static_cast<unsigned>(f.confidence));
-        y += 11;
+        // Confidence is what stops a finding being an accusation -- but an Info
+        // note is a statement about our own capture, not a claim about the
+        // device, so a percentage there would be meaningless.
+        if (lw::findingCarriesConfidence(f.sev)) {
+            ui::textRight(bd::kScreenW - 6, y, kFaint, "%u%%",
+                          static_cast<unsigned>(f.confidence));
+        }
+        y += 12;
+        shown++;
     }
 
+    if (shown < a.findings.count) {
+        ui::textAt(8, y, kFaint, "+%u more",
+                   static_cast<unsigned>(a.findings.count - shown));
+        y += 12;
+    }
+
+    // The explanation for the most severe finding. Findings are added in
+    // severity order, so the first is the one worth the space.
+    if (a.findings.count > 0) {
+        const int ruleY = bd::kScreenH - kFooterH - 36;
+        d.drawFastHLine(6, ruleY, bd::kScreenW - 12, kRule);
+        d.setFont(kFaceData);
+        ui::wrapText(8, ruleY + 5, bd::kScreenW - 16, 10, 3, kMuted,
+                     lw::findingDetail(a.findings.items[0].id));
+    }
+
+    d.setTextDatum(top_left);
     ui::footer("; . device   ` back");
 }
 
@@ -352,15 +383,15 @@ bool Airspace::handleKeys() {
                 return true;
 
             case 's': {
-                // Step the spreading factor. Widening SF coverage costs dwell
-                // time on each, which is the real trade the operator is making.
+                // Stepping the spreading factor widens coverage but costs dwell
+                // time on each -- the real trade the operator is making.
                 const lw::ChannelPlan& p = lw::plan(region_);
                 sfIndex_ = static_cast<uint8_t>((sfIndex_ + 1) % p.sfCount());
                 retune();
                 return true;
             }
 
-            case 'r': {
+            case 'r':
                 region_ = lw::regionAt(
                     (static_cast<size_t>(region_) + 1) % lw::regionCount());
                 chIndex_ = 0;
@@ -369,7 +400,6 @@ bool Airspace::handleKeys() {
                 visitedSfs_      = 0;
                 retune();
                 return true;
-            }
 
             default:
                 break;

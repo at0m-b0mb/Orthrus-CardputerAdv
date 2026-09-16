@@ -83,7 +83,17 @@ struct DeviceAssessment {
     FindingSet findings;
     uint8_t    score = 100;  // 0..100 before letter mapping
     Grade      grade = Grade::APlus;
+
+    // True when the grade rests on too little: either we heard too small a
+    // slice of the band, or too few frames from this device. The grade is still
+    // the best reading available -- it just has not earned the right to be
+    // stated flatly, and the UI marks it.
+    bool provisional = false;
 };
+
+// An Info finding is a statement about the capture, not an accusation about the
+// device, so its confidence is not a meaningful number to show.
+inline bool findingCarriesConfidence(Severity s) { return s != Severity::Info; }
 
 DeviceAssessment assess(const DeviceRecord& device, const CaptureContext& ctx);
 

@@ -242,6 +242,11 @@ DeviceAssessment assess(const DeviceRecord& d, const CaptureContext& ctx) {
 
     out.score = s;
     out.grade = scoreToGrade(s);
+
+    // The grade is as good as the evidence under it. Say so rather than letting
+    // an A+ from 16% of the band read like an A+ from all of it.
+    out.provisional = (coverage < kMinCoverageForAbsence) ||
+                      (d.framesSeen < kMinFramesForFullGrade);
     return out;
 }
 

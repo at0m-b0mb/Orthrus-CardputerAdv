@@ -22,6 +22,16 @@ constexpr char kVersion[] = "0.1.0";
 constexpr char kKeyUp   = ';';
 constexpr char kKeyDown = '.';
 
+// Vertical layout for a 135 px panel, written down rather than scattered.
+//
+// The first build put five two-line rows here and the last one fell off the
+// bottom behind the footer. One line per row, with the description shown once
+// for the selected item, is what actually fits -- and it reads better.
+constexpr int kListTop    = 21;
+constexpr int kRowH       = 15;
+constexpr int kDetailRule = 99;
+constexpr int kDetailText = 104;
+
 struct Surface {
     const char* name;
     const char* blurb;
@@ -31,11 +41,11 @@ struct Surface {
 // Product vocabulary, not framework vocabulary. Each name is what the operator
 // is actually pointing the device at.
 const Surface kSurfaces[] = {
-    {"Airspace",    "LoRa and LoRaWAN census",   true},
-    {"Perimeter",   "Wi-Fi recon and portals",   false},
-    {"Credentials", "NFC and 125 kHz badges",    false},
-    {"Control",     "Infrared and USB payloads", false},
-    {"Engagement",  "Scope, log, and export",    false},
+    {"Airspace",    "LoRa and LoRaWAN device census",  true},
+    {"Perimeter",   "Wi-Fi recon and captive portals", false},
+    {"Credentials", "NFC and 125 kHz badge work",      false},
+    {"Control",     "Infrared and USB payloads",       false},
+    {"Engagement",  "Scope, evidence log, export",     false},
 };
 constexpr int kSurfaceCount = sizeof(kSurfaces) / sizeof(kSurfaces[0]);
 
@@ -46,62 +56,69 @@ void drawSplash() {
     d.fillScreen(kInk);
 
     d.setFont(kFaceIdentity);
+    d.setTextDatum(middle_center);
     d.setTextColor(kText, kInk);
-    d.setCursor(16, 34);
-    d.print("ORTHRUS");
+    d.drawString("ORTHRUS", bd::kScreenW / 2, 44);
+
+    // One gold rule, centred under the wordmark.
+    d.drawFastHLine(bd::kScreenW / 2 - 52, 58, 104, kShine);
 
     d.setFont(kFaceData);
     d.setTextColor(kBrass, kInk);
-    d.setCursor(18, 58);
-    d.print("multi-surface red team platform");
+    d.drawString("multi-surface red team platform", bd::kScreenW / 2, 72);
 
     d.setTextColor(kFaint, kInk);
-    d.setCursor(18, 72);
-    d.printf("v%s   authorized testing only", kVersion);
+    d.drawString("authorized testing only", bd::kScreenW / 2, 86);
 
-    // A single gold rule, the only ornament in the whole product.
-    d.drawFastHLine(16, 88, 120, kShine);
+    char ver[24];
+    std::snprintf(ver, sizeof(ver), "v%s", kVersion);
+    d.setTextColor(kFaint, kInk);
+    d.drawString(ver, bd::kScreenW / 2, 104);
 
-    d.setTextColor(kMuted, kInk);
-    d.setCursor(18, 98);
-    d.print("press any key");
+    d.setTextDatum(top_left);
 }
 
 void drawMenu() {
     auto& d = M5Cardputer.Display;
     d.fillScreen(kInk);
 
-    char batt[16];
+    char batt[12];
     std::snprintf(batt, sizeof(batt), "%d%%", M5.Power.getBatteryLevel());
     orthrus::ui::chrome("Surfaces", batt);
 
-    const int top = kHeaderH + 3;
     for (int i = 0; i < kSurfaceCount; i++) {
-        const int y = top + i * 21;
+        const int y   = kListTop + i * kRowH;
+        const int mid = y + kRowH / 2;
         const bool sel = (i == g_selected);
 
-        if (sel) {
-            d.fillRect(0, y - 1, bd::kScreenW, 20, kSurface);
-            d.drawFastVLine(0, y - 1, 20, kShine);
-        }
+        orthrus::ui::listRow(y, kRowH, sel);
 
         d.setFont(kFaceUi);
+        d.setTextDatum(middle_left);
         d.setTextColor(kSurfaces[i].ready ? kText : kFaint, sel ? kSurface : kInk);
-        d.setCursor(8, y + 1);
-        d.print(kSurfaces[i].name);
-
-        d.setFont(kFaceData);
-        d.setTextColor(kMuted, sel ? kSurface : kInk);
-        d.setCursor(8, y + 13);
-        d.print(kSurfaces[i].blurb);
+        d.drawString(kSurfaces[i].name, 10, mid);
 
         if (!kSurfaces[i].ready) {
+            d.setFont(kFaceData);
+            d.setTextDatum(middle_right);
             d.setTextColor(kFaint, sel ? kSurface : kInk);
-            orthrus::ui::textRight(bd::kScreenW - 4, y + 6, kFaint, "soon");
+            d.drawString("soon", bd::kScreenW - 6, mid);
         }
     }
 
+    orthrus::ui::detailStrip(kDetailRule, kSurfaces[g_selected].blurb);
     orthrus::ui::footer("; . move    enter open");
+    d.setTextDatum(top_left);
+}
+
+// Shared "press anything to return" wait, so every dead end behaves the same.
+void waitForKey() {
+    for (;;) {
+        M5Cardputer.update();
+        if (M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed())
+            return;
+        delay(10);
+    }
 }
 
 void notReady(const Surface& s) {
@@ -110,25 +127,35 @@ void notReady(const Surface& s) {
     orthrus::ui::chrome(s.name);
 
     d.setFont(kFaceData);
+    d.setTextDatum(top_left);
     d.setTextColor(kMuted, kInk);
-    d.setCursor(6, kHeaderH + 14);
-    d.print("not built yet.");
-    d.setCursor(6, kHeaderH + 28);
-    d.print(s.blurb);
-    d.setCursor(6, kHeaderH + 46);
+    d.drawString("Not built yet.", 8, kHeaderH + 14);
+    d.setTextColor(kText, kInk);
+    d.drawString(s.blurb, 8, kHeaderH + 32);
+
     d.setTextColor(kFaint, kInk);
-    d.print("shipping it empty would be");
-    d.setCursor(6, kHeaderH + 55);
-    d.print("worse than saying so.");
+    d.drawString("Shipping it empty would be", 8, kHeaderH + 54);
+    d.drawString("worse than saying so.", 8, kHeaderH + 66);
 
-    orthrus::ui::footer("` back");
+    orthrus::ui::footer("any key   back");
+    waitForKey();
+}
 
-    for (;;) {
-        M5Cardputer.update();
-        if (M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed())
-            return;
-        delay(10);
-    }
+void radioFailed() {
+    auto& d = M5Cardputer.Display;
+    d.fillScreen(kInk);
+    orthrus::ui::chrome("Airspace");
+
+    d.setFont(kFaceData);
+    d.setTextDatum(top_left);
+    d.setTextColor(kCritical, kInk);
+    d.drawString("Radio did not start.", 8, kHeaderH + 16);
+    d.setTextColor(kMuted, kInk);
+    d.drawString("Check the LoRa cap is seated", 8, kHeaderH + 34);
+    d.drawString("and the antenna is fitted.", 8, kHeaderH + 46);
+
+    orthrus::ui::footer("any key   back");
+    waitForKey();
 }
 
 void openSurface(int index) {
@@ -138,25 +165,11 @@ void openSurface(int index) {
     }
 
     if (index == 0) {
+        // Static: the census table is ~13 KB and has no business on the stack.
         static orthrus::modules::Airspace airspace;
         if (!airspace.begin()) {
-            auto& d = M5Cardputer.Display;
-            d.fillScreen(kInk);
-            orthrus::ui::chrome("Airspace");
-            d.setFont(kFaceData);
-            d.setTextColor(kCritical, kInk);
-            d.setCursor(6, kHeaderH + 16);
-            d.print("radio did not start.");
-            d.setTextColor(kMuted, kInk);
-            d.setCursor(6, kHeaderH + 30);
-            d.print("check the LoRa cap is seated.");
-            orthrus::ui::footer("` back");
-            for (;;) {
-                M5Cardputer.update();
-                if (M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed())
-                    return;
-                delay(10);
-            }
+            radioFailed();
+            return;
         }
         airspace.run();
     }
@@ -171,7 +184,7 @@ void setup() {
     Serial.begin(115200);
 
     drawSplash();
-    const uint32_t deadline = millis() + 8000;
+    const uint32_t deadline = millis() + 6000;
     for (;;) {
         M5Cardputer.update();
         if (M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed()) break;
