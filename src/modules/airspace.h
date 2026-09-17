@@ -61,8 +61,8 @@ private:
 
     void sampleRssi();
 
-    hal::Gnss         gnss_;
-    hal::LoraRadio    radio_;
+    hal::Gnss&        gnss_  = hal::sharedGnss();
+    hal::LoraRadio&   radio_ = hal::sharedRadio();
     Spectrum          spectrum_;
     lorawan::Census   census_;
     lorawan::Region   region_ = lorawan::Region::EU868;

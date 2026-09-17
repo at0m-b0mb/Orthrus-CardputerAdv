@@ -12,6 +12,7 @@
 #include "hal/board.h"
 #include "modules/airspace.h"
 #include "modules/credentials.h"
+#include "modules/instruments.h"
 
 using namespace orthrus::theme;
 namespace bd = orthrus::board;
@@ -28,9 +29,11 @@ constexpr char kKeyDown = '.';
 // The first build put five two-line rows here and the last one fell off the
 // bottom behind the footer. One line per row, with the description shown once
 // for the selected item, is what actually fits -- and it reads better.
+// Six rows at 15 px ran the list under the detail strip. 14 px fits:
+// 21 + 6*14 = 105, rule at 107, description at 111, footer from 123.
 constexpr int kListTop    = 21;
-constexpr int kRowH       = 15;
-constexpr int kDetailRule = 99;
+constexpr int kRowH       = 14;
+constexpr int kDetailRule = 107;
 
 struct Surface {
     const char* name;
@@ -46,6 +49,7 @@ const Surface kSurfaces[] = {
     {"Credentials", "13.56 MHz badge identify and grade", true},
     {"Control",     "Infrared and USB payloads",       false},
     {"Engagement",  "Scope, evidence log, export",     false},
+    {"Instruments", "Live power, radio, GNSS and tilt", true},
 };
 constexpr int kSurfaceCount = sizeof(kSurfaces) / sizeof(kSurfaces[0]);
 
@@ -195,6 +199,13 @@ void openSurface(int index) {
             return;
         }
         airspace.run();
+        return;
+    }
+
+    if (index == 5) {
+        static orthrus::modules::Instruments instruments;
+        instruments.begin();
+        instruments.run();
         return;
     }
 

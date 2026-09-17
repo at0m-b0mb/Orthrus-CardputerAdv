@@ -199,4 +199,9 @@ void LoraRadio::idle() {
     if (ready_) g_radio.standby();
 }
 
+LoraRadio& sharedRadio() {
+    static LoraRadio instance;
+    return instance;
+}
+
 }  // namespace orthrus::hal

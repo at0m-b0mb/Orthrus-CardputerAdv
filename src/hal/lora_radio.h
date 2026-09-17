@@ -66,4 +66,13 @@ private:
     const char* lastError_ = "";
 };
 
+// One chip, one object.
+//
+// The SX1262 driver keeps its SPI, Module and radio objects at file scope, so
+// every LoraRadio instance talks to the SAME chip while each keeps its own idea
+// of whether it has been initialised and what it is tuned to. Two of them is a
+// latent bug: the second begin() silently re-initialises the chip out from
+// under the first. Anything that needs the radio takes this reference.
+LoraRadio& sharedRadio();
+
 }  // namespace orthrus::hal

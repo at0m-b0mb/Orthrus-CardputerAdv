@@ -35,6 +35,7 @@ private:
     void drawDossier();
     void drawRoll();
     bool handleKeys();
+    void runKeyProbe();
 
     // A small roll of what has been presented this session. A physical
     // engagement means walking past a lot of people; being able to look back at
@@ -50,6 +51,8 @@ private:
     int findInRoll(const credential::TagIdentity& t) const;
 
     hal::Rfid2 reader_;
+    const char* probeNote_ = nullptr;
+    char        probeBuf_[64] = {0};
     const char* busName_ = "none";
 
     Seen    roll_[kRollMax];

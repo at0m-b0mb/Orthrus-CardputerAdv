@@ -5,6 +5,7 @@
 #include <cstring>
 
 #include "board.h"
+#include "credential/defaults.h"
 
 namespace orthrus::hal {
 
@@ -20,6 +21,7 @@ constexpr uint32_t kI2cFreq = 100000;
 constexpr uint8_t REG_COMMAND      = 0x01;
 constexpr uint8_t REG_COM_IRQ      = 0x04;
 constexpr uint8_t REG_ERROR        = 0x06;
+constexpr uint8_t REG_STATUS2      = 0x08;
 constexpr uint8_t REG_FIFO_DATA    = 0x09;
 constexpr uint8_t REG_FIFO_LEVEL   = 0x0A;
 constexpr uint8_t REG_CONTROL      = 0x0C;
@@ -38,6 +40,7 @@ constexpr uint8_t REG_VERSION      = 0x37;
 
 constexpr uint8_t CMD_IDLE       = 0x00;
 constexpr uint8_t CMD_CALC_CRC   = 0x03;
+constexpr uint8_t CMD_MF_AUTHENT = 0x0E;
 constexpr uint8_t CMD_TRANSCEIVE = 0x0C;
 constexpr uint8_t CMD_SOFT_RESET = 0x0F;
 
@@ -45,6 +48,8 @@ constexpr uint8_t CMD_SOFT_RESET = 0x0F;
 constexpr uint8_t PICC_REQA   = 0x26;
 constexpr uint8_t PICC_HLTA   = 0x50;
 constexpr uint8_t PICC_RATS   = 0xE0;
+constexpr uint8_t PICC_AUTH_KEY_A = 0x60;
+constexpr uint8_t PICC_AUTH_KEY_B = 0x61;
 constexpr uint8_t PICC_SEL_CL1 = 0x93;
 constexpr uint8_t PICC_SEL_CL2 = 0x95;
 constexpr uint8_t PICC_SEL_CL3 = 0x97;
@@ -359,6 +364,101 @@ ReaderStatus Rfid2::poll(credential::TagIdentity& tag) {
 
     tag = found;
     return ReaderStatus::Ok;
+}
+
+// Crypto1 authentication is performed by the reader itself: we hand it the
+// key and the UID and it runs the three-pass handshake in hardware.
+ReaderStatus Rfid2::authenticate(uint8_t keyType, uint8_t block,
+                                 const uint8_t key[6],
+                                 const credential::TagIdentity& tag) {
+    // Mifare Classic authenticates against four UID bytes. Cards with a 7-byte
+    // UID use the LAST four, which is the detail that silently breaks auth on
+    // anything that is not a plain 1K.
+    const uint8_t* uid = tag.uid;
+    if (tag.uidLen >= 7) uid = tag.uid + (tag.uidLen - 4);
+    else if (tag.uidLen < 4) return ReaderStatus::ProtocolError;
+
+    uint8_t buf[12];
+    buf[0] = keyType;   // 0x60 key A, 0x61 key B
+    buf[1] = block;
+    for (uint8_t i = 0; i < 6; i++) buf[2 + i] = key[i];
+    for (uint8_t i = 0; i < 4; i++) buf[8 + i] = uid[i];
+
+    writeReg(REG_COMMAND, CMD_IDLE);
+    writeReg(REG_COM_IRQ, 0x7F);
+    writeReg(REG_FIFO_LEVEL, 0x80);
+    for (uint8_t i = 0; i < sizeof(buf); i++) writeReg(REG_FIFO_DATA, buf[i]);
+    writeReg(REG_COMMAND, CMD_MF_AUTHENT);
+
+    // MFAuthent signals completion through IdleIRq; there is no RxIRq for it.
+    for (int i = 0; i < 300; i++) {
+        uint8_t irq = 0;
+        if (!readReg(REG_COM_IRQ, irq)) return ReaderStatus::NotPresent;
+        if (irq & 0x10) break;                       // IdleIRq: sequence finished
+        if (irq & 0x01) return ReaderStatus::NoCard;  // TimerIRq
+        delayMicroseconds(150);
+    }
+
+    // The only trustworthy success signal is the crypto unit actually being on.
+    uint8_t status2 = 0;
+    if (!readReg(REG_STATUS2, status2)) return ReaderStatus::NotPresent;
+    return (status2 & 0x08) ? ReaderStatus::Ok : ReaderStatus::ProtocolError;
+}
+
+void Rfid2::stopCrypto1() {
+    // Leaving the crypto unit on makes every later plain command fail in a way
+    // that looks like a dead card.
+    clearRegBits(REG_STATUS2, 0x08);
+}
+
+ReaderStatus Rfid2::reselect(credential::TagIdentity& tag) {
+    uint16_t atqa = 0;
+    ReaderStatus st = requestA(atqa);
+    if (st != ReaderStatus::Ok) return st;
+    return cascade(tag);
+}
+
+uint16_t Rfid2::probeAttemptCount() {
+    return static_cast<uint16_t>(credential::defaultKeyCount() * 2);
+}
+
+bool Rfid2::probeDefaultKeys(credential::TagIdentity& tag, uint8_t* keyIndexOut,
+                             uint8_t* keyTypeOut) {
+    tag.triedDefaultKeys   = true;
+    tag.defaultKeyAccepted = false;
+    if (!present_) return false;
+
+    // Only Crypto1 cards have keys to try. Running this against a DESFire would
+    // be noise, and reporting a failure against it would be misleading.
+    if (!tag.isClassicCompatible()) return false;
+
+    const credential::DefaultKey* keys = credential::defaultKeys();
+    const size_t n = credential::defaultKeyCount();
+
+    for (uint8_t type = 0; type < 2; type++) {
+        const uint8_t cmd = type == 0 ? PICC_AUTH_KEY_A : PICC_AUTH_KEY_B;
+        for (size_t i = 0; i < n; i++) {
+            // A failed authentication leaves the card mute, so it has to be
+            // taken through anticollision again before the next attempt.
+            credential::TagIdentity again;
+            if (reselect(again) != ReaderStatus::Ok) {
+                stopCrypto1();
+                delay(5);
+                continue;
+            }
+
+            if (authenticate(cmd, /*block=*/0, keys[i].key, again) == ReaderStatus::Ok) {
+                stopCrypto1();
+                tag.defaultKeyAccepted = true;
+                tag.defaultKeySector   = 0;
+                if (keyIndexOut) *keyIndexOut = static_cast<uint8_t>(i);
+                if (keyTypeOut)  *keyTypeOut  = type;
+                return true;
+            }
+            stopCrypto1();
+        }
+    }
+    return false;
 }
 
 void Rfid2::halt() {

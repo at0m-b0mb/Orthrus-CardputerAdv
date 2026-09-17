@@ -7,6 +7,7 @@
 
 #include "app/theme.h"
 #include "app/ui.h"
+#include "credential/defaults.h"
 #include "hal/board.h"
 
 namespace orthrus::modules {
@@ -99,11 +100,51 @@ void Credentials::poll() {
         selected_ = -1;
     }
 
+    if (existing < 0) probeNote_ = nullptr;  // a new badge, not the old result
     if (view_ == View::Waiting) view_ = View::Card;
 
     // Put the card to sleep so the next poll sees a genuinely new presentation
     // rather than the same badge answering forever.
     reader_.halt();
+}
+
+void Credentials::runKeyProbe() {
+    if (selected_ < 0 || selected_ >= static_cast<int>(rollCount_)) return;
+    cr::TagIdentity& t = roll_[selected_].tag;
+
+    if (!t.isClassicCompatible()) {
+        probeNote_ = "no Crypto1 sectors to try";
+        return;
+    }
+
+    // Tell the operator what is happening before blocking for a second or two,
+    // and tell them to keep the card there -- the probe needs it.
+    ui::beginFrame();
+    ui::chrome("Key probe");
+    auto& d = ui::gfx();
+    d.setFont(kFaceData);
+    d.setTextDatum(top_left);
+    d.setTextColor(kText, kInk);
+    d.drawString("Trying published default keys", 8, kBodyTop + 14);
+    d.setTextColor(kBrass, kInk);
+    d.drawString("KEEP THE CARD ON THE READER", 8, kBodyTop + 34);
+    d.setTextColor(kFaint, kInk);
+    d.drawString("read only - nothing is written", 8, kBodyTop + 54);
+    ui::footer("working...");
+    ui::endFrame();
+
+    uint8_t keyIndex = 0, keyType = 0;
+    const bool opened = reader_.probeDefaultKeys(t, &keyIndex, &keyType);
+
+    if (opened) {
+        const cr::DefaultKey& k = cr::defaultKeys()[keyIndex];
+        std::snprintf(probeBuf_, sizeof(probeBuf_), "key %c: %s",
+                      keyType == 0 ? 'A' : 'B', k.origin);
+        probeNote_ = probeBuf_;
+    } else {
+        probeNote_ = "no published key opened it";
+    }
+    view_ = View::Card;
 }
 
 void Credentials::drawWaiting() {
@@ -193,12 +234,16 @@ void Credentials::drawCard() {
         }
     }
 
-    if (a.surfaceOnly) {
+    if (probeNote_ != nullptr) {
+        ui::textAt(8, kBodyTop + 84, a.findings.has(cr::FindingId::DefaultKeyAccepted)
+                                         ? kCritical : kMuted,
+                   "%s", probeNote_);
+    } else if (a.surfaceOnly) {
         ui::textRight(bd::kScreenW - 6, kBodyTop + 73, kFaint, "surface read");
     }
 
     d.setTextDatum(top_left);
-    ui::footer("enter findings   r roll   ` back");
+    ui::footer("enter findings  k keys  r roll  ` back");
     ui::endFrame();
 }
 
@@ -336,6 +381,12 @@ bool Credentials::handleKeys() {
 
             case 'r':
                 if (rollCount_) view_ = View::Roll;
+                return true;
+
+            case 'k':
+                // Only meaningful on a Crypto1 card, and only with the badge
+                // still on the reader -- the probe re-selects between attempts.
+                if (view_ == View::Card || view_ == View::Dossier) runKeyProbe();
                 return true;
 
             default:

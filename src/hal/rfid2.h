@@ -56,6 +56,26 @@ public:
     // one rather than the same card over and over.
     void halt();
 
+    // Tries the published default keys against sector 0.
+    //
+    // READ ONLY. It authenticates and stops; it never writes a block, never
+    // changes a key, and never touches the access bits. Proving a badge still
+    // carries its factory key is the finding -- altering it would be vandalism.
+    //
+    // This is not a key-recovery attack: no nested or darkside cracking is
+    // implemented. If none of the published keys open it, the honest answer is
+    // "we could not open it".
+    //
+    // Sets tag.triedDefaultKeys either way, and on success sets
+    // tag.defaultKeyAccepted. `keyIndexOut` receives the index into
+    // credential::defaultKeys(), `keyTypeOut` 0 for key A or 1 for key B.
+    bool probeDefaultKeys(credential::TagIdentity& tag,
+                          uint8_t* keyIndexOut = nullptr,
+                          uint8_t* keyTypeOut = nullptr);
+
+    // How many attempts probeDefaultKeys will make, for a progress indicator.
+    static uint16_t probeAttemptCount();
+
     // Turns the field off. The reader draws ~26 mA with the antenna live and
     // this is a battery device.
     void antennaOff();
@@ -81,6 +101,11 @@ private:
     ReaderStatus requestA(uint16_t& atqa);
     ReaderStatus cascade(credential::TagIdentity& tag);
     ReaderStatus requestAts(credential::TagIdentity& tag);
+
+    ReaderStatus authenticate(uint8_t keyType, uint8_t block, const uint8_t key[6],
+                              const credential::TagIdentity& tag);
+    void         stopCrypto1();
+    ReaderStatus reselect(credential::TagIdentity& tag);
 
     m5::I2C_Class* bus_ = nullptr;
     uint8_t     address_ = 0x28;

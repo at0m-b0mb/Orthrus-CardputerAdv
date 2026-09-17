@@ -58,4 +58,8 @@ private:
     bool        started_    = false;
 };
 
+// Same reasoning as sharedRadio(): two Gnss objects would both drain Serial2
+// and steal each other's bytes, so neither would ever see a complete sentence.
+Gnss& sharedGnss();
+
 }  // namespace orthrus::hal

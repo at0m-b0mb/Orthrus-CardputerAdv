@@ -27,4 +27,9 @@ void Gnss::pump() {
     }
 }
 
+Gnss& sharedGnss() {
+    static Gnss instance;
+    return instance;
+}
+
 }  // namespace orthrus::hal
