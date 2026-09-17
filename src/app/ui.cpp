@@ -228,7 +228,7 @@ int wrapText(int x, int y, int maxWidth, int lineHeight, int maxLines,
     d.setTextDatum(top_left);
     d.setTextColor(colour, kInk);
 
-    char   line[64];
+    char   line[64] = {0};
     size_t lineLen = 0;
     int    drawn   = 0;
 

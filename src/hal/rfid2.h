@@ -76,6 +76,13 @@ public:
     // How many attempts probeDefaultKeys will make, for a progress indicator.
     static uint16_t probeAttemptCount();
 
+    // True if the card answered anticollision at least once during the last
+    // probe. Without this, a card lifted off the reader mid-probe is
+    // indistinguishable from a card that refused every key -- and reporting
+    // "no published key opened it" for a card we never spoke to is a finding
+    // we did not earn.
+    bool lastProbeSawCard() const { return lastProbeSawCard_; }
+
     // Turns the field off. The reader draws ~26 mA with the antenna live and
     // this is a battery device.
     void antennaOff();
@@ -112,6 +119,7 @@ private:
     bool        present_ = false;
     uint8_t     version_ = 0;
     const char* lastError_ = "";
+    bool        lastProbeSawCard_ = false;
 };
 
 const char* readerStatusName(ReaderStatus s);

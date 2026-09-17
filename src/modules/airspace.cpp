@@ -428,7 +428,6 @@ void Airspace::drawDossier() {
     if (shown < a.findings.count) {
         ui::textAt(8, y, kFaint, "+%u more",
                    static_cast<unsigned>(a.findings.count - shown));
-        y += 12;
     }
 
     // The explanation for the most severe finding. Findings are added in

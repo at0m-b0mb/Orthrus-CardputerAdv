@@ -33,7 +33,7 @@ bool Engagement::begin() {
 }
 
 void Engagement::exportKml() {
-    auto& rec = app::recorder();
+    const auto& rec = app::recorder();
     if (!rec.active()) {
         resultOk_ = false;
         std::snprintf(resultTitle_, sizeof(resultTitle_), "No session");
@@ -46,7 +46,30 @@ void Engagement::exportKml() {
     char kmlPath[48];
     std::snprintf(kmlPath, sizeof(kmlPath), "%s", rec.path());
     char* dot = std::strrchr(kmlPath, '.');
-    if (dot) std::snprintf(dot, sizeof(kmlPath) - (dot - kmlPath), ".kml");
+
+    // Refuse rather than risk it. With no extension the derived path would
+    // equal the log path, and opening that for writing TRUNCATES the evidence
+    // file -- destroying the very thing we are exporting.
+    if (dot == nullptr || dot == kmlPath) {
+        resultOk_ = false;
+        std::snprintf(resultTitle_, sizeof(resultTitle_), "Refused");
+        std::snprintf(resultBody_, sizeof(resultBody_),
+                      "Log path has no extension, so the export would overwrite "
+                      "it. Nothing was written.");
+        view_ = View::Result;
+        return;
+    }
+    std::snprintf(dot, sizeof(kmlPath) - (dot - kmlPath), ".kml");
+
+    // Belt and braces: if the two paths still match, stop.
+    if (std::strcmp(kmlPath, rec.path()) == 0) {
+        resultOk_ = false;
+        std::snprintf(resultTitle_, sizeof(resultTitle_), "Refused");
+        std::snprintf(resultBody_, sizeof(resultBody_),
+                      "Export path matches the log path. Nothing was written.");
+        view_ = View::Result;
+        return;
+    }
 
     File in = SD.open(rec.path(), FILE_READ);
     if (!in) {
@@ -67,7 +90,7 @@ void Engagement::exportKml() {
         return;
     }
 
-    char buf[1024];
+    char buf[1536];  // a full-length escaped detail needs ~900
     ev::kmlHeader(buf, sizeof(buf), rec.path());
     out.print(buf);
 

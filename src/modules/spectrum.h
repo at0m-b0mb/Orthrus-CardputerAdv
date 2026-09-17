@@ -28,7 +28,7 @@ public:
     static constexpr int kFloorDbm   = -128;
     static constexpr int kCeilingDbm = -60;
 
-    void configure(uint32_t startHz, uint32_t endHz);
+    void configure(uint32_t fromHz, uint32_t toHz);
     void reset();
 
     // Advances the sweep. Returns true when a full pass has just completed.

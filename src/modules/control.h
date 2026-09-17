@@ -44,6 +44,11 @@ private:
     uint16_t     command_  = 0x00;
     uint8_t      repeats_  = 3;
 
+    // Flipped on every send. RC5 receivers use this bit to tell a new key
+    // press from a held one; leaving it constant makes the second press look
+    // like a continuation of the first and it gets dropped.
+    bool         rc5Toggle_ = false;
+
     Field    field_       = Field::Protocol;
     uint32_t lastSendMs_  = 0;
     uint32_t sent_        = 0;

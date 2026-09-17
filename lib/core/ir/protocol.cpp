@@ -92,7 +92,8 @@ uint32_t repeatGapUs(Protocol p) {
     }
 }
 
-bool encode(Protocol p, uint16_t address, uint16_t command, PulseTrain& out) {
+bool encode(Protocol p, uint16_t address, uint16_t command, PulseTrain& out,
+            bool toggle) {
     out = PulseTrain{};
     out.carrierHz = carrierFor(p);
 
@@ -145,29 +146,44 @@ bool encode(Protocol p, uint16_t address, uint16_t command, PulseTrain& out) {
         }
 
         case Protocol::Rc5: {
-            // Two start bits, a toggle bit, 5 address bits, 6 command bits,
-            // all Manchester encoded. A logical one is space-then-mark; the
-            // train must begin with a mark, and the first start bit is a one,
-            // so the leading space is folded away by starting at its mark.
+            // Two start bits, a toggle bit, 5 address bits, 6 command bits.
             const uint16_t bits = static_cast<uint16_t>(
-                (1u << 13) |            // start 1
-                (1u << 12) |            // start 2 (RC5, not RC5X)
-                (0u << 11) |            // toggle: caller-independent
+                (1u << 13) |                            // start 1
+                (1u << 12) |                            // start 2 (RC5, not RC5X)
+                (static_cast<unsigned>(toggle) << 11) | // new press vs held
                 ((address & 0x1F) << 6) |
                 (command & 0x3F));
 
-            bool first = true;
+            // Manchester, expanded to half-bit LEVELS first.
+            //
+            // An earlier version pushed two 889 us intervals for both a one and
+            // a zero, which made them byte-for-byte identical -- RC5 encoded
+            // nothing at all, and every frame was the same regardless of the
+            // command. Levels have to be built, then equal neighbours merged,
+            // which is what produces the 1778 us intervals real RC5 contains.
+            //
+            // RC5 sends a one as space-then-mark and a zero as mark-then-space.
+            bool level[28];
+            int  n = 0;
             for (int i = 13; i >= 0; i--) {
                 const bool one = (bits >> i) & 1;
-                if (one) {
-                    // space then mark; the very first space is implicit.
-                    if (!first) push(out, kRc5Half);
-                    push(out, kRc5Half);
-                } else {
-                    push(out, kRc5Half);  // mark then space
-                    push(out, kRc5Half);
-                }
-                first = false;
+                level[n++] = !one;  // first half
+                level[n++] = one;   // second half
+            }
+
+            // The train must begin with a mark. A leading space is simply
+            // silence before the frame and carries nothing.
+            int start = 0;
+            while (start < n && !level[start]) start++;
+
+            // Merge runs of equal level into one interval each. By
+            // construction the result then alternates mark, space, mark...
+            int i = start;
+            while (i < n) {
+                int run = 1;
+                while (i + run < n && level[i + run] == level[i]) run++;
+                push(out, static_cast<uint16_t>(kRc5Half * run));
+                i += run;
             }
             return true;
         }

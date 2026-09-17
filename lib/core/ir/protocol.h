@@ -44,7 +44,12 @@ struct PulseTrain {
 // Encodes one frame. Returns false if the protocol cannot represent the given
 // address or command, rather than silently truncating them -- a command that
 // does not fit is a caller error worth surfacing.
-bool encode(Protocol p, uint16_t address, uint16_t command, PulseTrain& out);
+// `toggle` is the RC5 toggle bit and is ignored by every other protocol. It
+// must FLIP between separate key presses: RC5 receivers use it to tell a new
+// press from a held key, so sending it constant makes the second press look
+// like a continuation of the first and it gets dropped.
+bool encode(Protocol p, uint16_t address, uint16_t command, PulseTrain& out,
+            bool toggle = false);
 
 // The gap a remote leaves between repeats of the same frame.
 uint32_t repeatGapUs(Protocol p);

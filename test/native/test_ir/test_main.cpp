@@ -9,6 +9,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <initializer_list>
 
 #include "ir/protocol.h"
 
@@ -54,6 +55,38 @@ bool decodeSony(const PulseTrain& t, uint8_t addrBits, uint16_t& addr,
         if (t.us[idx + 1] != 600) return false;
         if (t.us[idx] == 1200) addr |= static_cast<uint16_t>(1u << i);
         else if (t.us[idx] != 600) return false;
+    }
+    return true;
+}
+
+// Reads an RC5 train back into its 14 bits, the way a receiver would: expand
+// each interval into half-bit levels, restore the implicit leading space, then
+// read pairs.
+bool decodeRc5(const PulseTrain& t, uint16_t& bits) {
+    bool level[32];
+    int n = 0;
+    bool mark = true;                 // the train always starts on a mark
+    level[n++] = false;               // the leading space that was folded away
+
+    for (uint8_t i = 0; i < t.count; i++) {
+        if (t.us[i] % 889 != 0) return false;
+        const int run = t.us[i] / 889;
+        if (run < 1 || run > 2) return false;
+        for (int k = 0; k < run; k++) {
+            if (n >= 32) return false;
+            level[n++] = mark;
+        }
+        mark = !mark;
+    }
+    if (n != 28) return false;
+
+    bits = 0;
+    for (int b = 0; b < 14; b++) {
+        const bool firstHalf  = level[b * 2];
+        const bool secondHalf = level[b * 2 + 1];
+        if (firstHalf == secondHalf) return false;   // not Manchester
+        const bool one = secondHalf;                 // space-then-mark == 1
+        bits = static_cast<uint16_t>((bits << 1) | (one ? 1u : 0u));
     }
     return true;
 }
@@ -159,6 +192,74 @@ void test_rc5_is_manchester_and_uniform() {
     }
 }
 
+void test_rc5_round_trips_through_a_decoder() {
+    // The property that would have caught the original bug immediately: a one
+    // and a zero must encode differently, and the whole word must come back.
+    for (uint16_t addr = 0; addr <= 0x1F; addr += 3) {
+        for (uint16_t cmd = 0; cmd <= 0x3F; cmd += 5) {
+            for (int tog = 0; tog < 2; tog++) {
+                PulseTrain t;
+                TEST_ASSERT_TRUE(encode(Protocol::Rc5, addr, cmd, t, tog != 0));
+
+                uint16_t bits = 0;
+                TEST_ASSERT_TRUE(decodeRc5(t, bits));
+                TEST_ASSERT_EQUAL_UINT16(1, (bits >> 13) & 1);      // start 1
+                TEST_ASSERT_EQUAL_UINT16(1, (bits >> 12) & 1);      // start 2
+                TEST_ASSERT_EQUAL_UINT16(tog, (bits >> 11) & 1);    // toggle
+                TEST_ASSERT_EQUAL_UINT16(addr, (bits >> 6) & 0x1F);
+                TEST_ASSERT_EQUAL_UINT16(cmd, bits & 0x3F);
+            }
+        }
+    }
+}
+
+void test_rc5_contains_double_length_intervals() {
+    // Real RC5 merges same-polarity halves. A train of nothing but 889 us
+    // intervals is the signature of the encoding bug that was there before.
+    PulseTrain t;
+    TEST_ASSERT_TRUE(encode(Protocol::Rc5, 0x00, 0x00, t, false));
+    bool sawLong = false;
+    for (uint8_t i = 0; i < t.count; i++) if (t.us[i] == 1778) sawLong = true;
+    TEST_ASSERT_TRUE(sawLong);
+}
+
+void test_rc5_toggle_bit_actually_changes_the_frame() {
+    // The regression. RC5 receivers use the toggle bit to tell a new key press
+    // from a held one. Sending it constant makes the second press look like a
+    // continuation of the first, and the device ignores it -- a bug that fails
+    // silently, since the first press always works.
+    PulseTrain a, b;
+    TEST_ASSERT_TRUE(encode(Protocol::Rc5, 0x05, 0x0A, a, false));
+    TEST_ASSERT_TRUE(encode(Protocol::Rc5, 0x05, 0x0A, b, true));
+
+    bool differs = false;
+    if (a.count != b.count) differs = true;
+    else for (uint8_t i = 0; i < a.count; i++)
+        if (a.us[i] != b.us[i]) { differs = true; break; }
+    TEST_ASSERT_TRUE(differs);
+}
+
+void test_toggle_is_ignored_by_every_other_protocol() {
+    // Only RC5 carries it. If NEC frames changed with the toggle, a caller
+    // flipping it per press would be sending two different commands.
+    for (auto p : {Protocol::Nec, Protocol::NecExtended, Protocol::Sony12,
+                   Protocol::Sony20}) {
+        PulseTrain a, b;
+        TEST_ASSERT_TRUE(encode(p, 0x01, 0x02, a, false));
+        TEST_ASSERT_TRUE(encode(p, 0x01, 0x02, b, true));
+        TEST_ASSERT_EQUAL_UINT8(a.count, b.count);
+        for (uint8_t i = 0; i < a.count; i++)
+            TEST_ASSERT_EQUAL_UINT16(a.us[i], b.us[i]);
+    }
+}
+
+void test_toggled_rc5_is_still_valid_manchester() {
+    PulseTrain t;
+    TEST_ASSERT_TRUE(encode(Protocol::Rc5, 0x1F, 0x3F, t, true));
+    for (uint8_t i = 0; i < t.count; i++)
+        TEST_ASSERT_TRUE(t.us[i] == 889 || t.us[i] == 1778);
+}
+
 // ---- range checking ---------------------------------------------------------
 
 void test_out_of_range_is_refused_not_truncated() {
@@ -221,6 +322,11 @@ int main(int, char**) {
     RUN_TEST(test_sony_uses_a_40khz_carrier);
 
     RUN_TEST(test_rc5_is_manchester_and_uniform);
+    RUN_TEST(test_rc5_round_trips_through_a_decoder);
+    RUN_TEST(test_rc5_contains_double_length_intervals);
+    RUN_TEST(test_rc5_toggle_bit_actually_changes_the_frame);
+    RUN_TEST(test_toggle_is_ignored_by_every_other_protocol);
+    RUN_TEST(test_toggled_rc5_is_still_valid_manchester);
 
     RUN_TEST(test_out_of_range_is_refused_not_truncated);
     RUN_TEST(test_boundary_values_are_accepted);

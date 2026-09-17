@@ -281,7 +281,7 @@ ReaderStatus Rfid2::cascade(credential::TagIdentity& tag) {
     for (uint8_t level = 0; level < 3; level++) {
         // Anticollision: SEL, NVB=0x20, and the card answers with 4 UID bytes
         // plus a BCC.
-        uint8_t tx[2] = {kSelCmd[level], 0x20};
+        const uint8_t tx[2] = {kSelCmd[level], 0x20};
         uint8_t rx[8] = {0};
         uint8_t rxLen = sizeof(rx);
 
@@ -426,6 +426,7 @@ bool Rfid2::probeDefaultKeys(credential::TagIdentity& tag, uint8_t* keyIndexOut,
                              uint8_t* keyTypeOut) {
     tag.triedDefaultKeys   = true;
     tag.defaultKeyAccepted = false;
+    lastProbeSawCard_      = false;
     if (!present_) return false;
 
     // Only Crypto1 cards have keys to try. Running this against a DESFire would
@@ -446,6 +447,7 @@ bool Rfid2::probeDefaultKeys(credential::TagIdentity& tag, uint8_t* keyIndexOut,
                 delay(5);
                 continue;
             }
+            lastProbeSawCard_ = true;
 
             if (authenticate(cmd, /*block=*/0, keys[i].key, again) == ReaderStatus::Ok) {
                 stopCrypto1();

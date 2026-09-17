@@ -89,16 +89,21 @@ void Credentials::poll() {
         roll_[existing].count++;
         roll_[existing].tag = t;
         selected_ = existing;
-    } else if (rollCount_ < kRollMax) {
+    } else {
+        if (rollCount_ >= kRollMax) {
+            // Evict the oldest. Keeping the oldest instead left selected_ at
+            // -1, which bounced the card view straight back to Waiting -- so
+            // from the thirteenth badge onwards, tapping a card showed nothing
+            // at all. On an engagement the newest badge is the one in your
+            // hand, so that is the one to keep.
+            for (uint8_t i = 1; i < kRollMax; i++) roll_[i - 1] = roll_[i];
+            rollCount_ = kRollMax - 1;
+        }
         roll_[rollCount_].tag     = t;
         roll_[rollCount_].firstMs = millis();
         roll_[rollCount_].count   = 1;
         selected_ = rollCount_;
         rollCount_++;
-    } else {
-        // Roll is full. Keep the oldest entries rather than silently dropping
-        // history, and just show the newest card without recording it.
-        selected_ = -1;
     }
 
     if (existing < 0) {
@@ -139,6 +144,15 @@ void Credentials::runKeyProbe() {
 
     uint8_t keyIndex = 0, keyType = 0;
     const bool opened = reader_.probeDefaultKeys(t, &keyIndex, &keyType);
+
+    // If the card never answered, saying "no published key opened it" would be
+    // a finding we did not earn: we never got to ask.
+    if (!opened && !reader_.lastProbeSawCard()) {
+        probeNote_ = "card gone - hold it steady and retry";
+        t.triedDefaultKeys = false;   // do not record a probe that never ran
+        view_ = View::Card;
+        return;
+    }
 
     if (opened) {
         const cr::DefaultKey& k = cr::defaultKeys()[keyIndex];

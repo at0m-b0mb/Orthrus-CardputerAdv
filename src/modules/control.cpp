@@ -78,8 +78,12 @@ void Control::adjust(int delta) {
 
 void Control::transmit() {
     ir::PulseTrain train;
-    lastOk_ = ir::encode(protocol_, address_, command_, train);
+    lastOk_ = ir::encode(protocol_, address_, command_, train, rc5Toggle_);
     if (!lastOk_) return;
+
+    // Flip only once the frame is known good, so a refused encode does not
+    // silently consume a toggle and desynchronise the next real press.
+    rc5Toggle_ = !rc5Toggle_;
 
     // Show the armed state before the emitter fires, not after. The frame takes
     // tens of milliseconds and the operator should see what is happening.
@@ -131,12 +135,11 @@ void Control::draw() {
     const struct {
         Field       f;
         const char* label;
-        char        value[24];
     } rows[] = {
-        {Field::Protocol, "protocol", {0}},
-        {Field::Address,  "address",  {0}},
-        {Field::Command,  "command",  {0}},
-        {Field::Repeats,  "repeats",  {0}},
+        {Field::Protocol, "protocol"},
+        {Field::Address,  "address"},
+        {Field::Command,  "command"},
+        {Field::Repeats,  "repeats"},
     };
 
     char v[4][24];

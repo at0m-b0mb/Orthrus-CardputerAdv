@@ -19,11 +19,11 @@ int8_t clampDbm(float v) {
 
 }  // namespace
 
-void Spectrum::configure(uint32_t startHz, uint32_t endHz) {
-    if (endHz <= startHz) return;
-    if (startHz_ == startHz && endHz_ == endHz) return;
-    startHz_ = startHz;
-    endHz_   = endHz;
+void Spectrum::configure(uint32_t fromHz, uint32_t toHz) {
+    if (toHz <= fromHz) return;
+    if (startHz_ == fromHz && endHz_ == toHz) return;
+    startHz_ = fromHz;
+    endHz_   = toHz;
     reset();
 }
 
@@ -50,12 +50,12 @@ bool Spectrum::step(hal::LoraRadio& radio, int points) {
     for (int i = 0; i < points; i++) {
         const float v = radio.sampleFloorAt(binFreqHz(cursor_));
         if (v != 0.0f) {
-            const int8_t level = clampDbm(v);
-            bins_[cursor_] = level;
+            const int8_t sample = clampDbm(v);
+            bins_[cursor_] = sample;
             // Max-hold is what makes a bursty transmitter visible at all: a
             // LoRa uplink is on air for well under a second and a live trace
             // will almost always miss it.
-            if (level > hold_[cursor_]) hold_[cursor_] = level;
+            if (sample > hold_[cursor_]) hold_[cursor_] = sample;
         }
 
         cursor_++;

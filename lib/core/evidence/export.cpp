@@ -9,8 +9,8 @@ namespace {
 
 // Appends to a bounded buffer, tracking overflow rather than pretending.
 struct Writer {
-    char*  out;
-    size_t cap;
+    char*  out = nullptr;
+    size_t cap = 0;
     size_t used = 0;
     bool   overflowed = false;
 
@@ -92,7 +92,7 @@ size_t escapeXml(const char* in, char* out, size_t cap) {
     size_t used = 0;
     for (const char* p = in; *p; p++) {
         const char* rep = nullptr;
-        char one[2] = {*p, '\0'};
+        const char one[2] = {*p, '\0'};
 
         switch (*p) {
             case '&':  rep = "&amp;";  break;
