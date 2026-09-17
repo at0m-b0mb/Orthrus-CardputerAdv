@@ -42,6 +42,19 @@ Position positionOf(const Record& r);
 // returning cap-1 so a caller can notice rather than silently ship half a tag.
 size_t escapeXml(const char* in, char* out, size_t cap);
 
+// Replaces every control byte (anything below 0x20, and DEL) with a space.
+//
+// This is not cosmetic. Detail strings come off the air, and a newline inside
+// one splits a CSV record across two physical lines: the row no longer parses,
+// the chain no longer verifies against the file, and a crafted payload can
+// inject lines that look like genuine records to anyone reading the log. A
+// fuzzer found exactly that.
+//
+// It is idempotent, so applying it at both the record and the formatting layer
+// is safe -- which matters, because the hash chain must cover precisely the
+// text that lands on the card.
+size_t sanitiseText(const char* in, char* out, size_t cap);
+
 // CSV. Returns bytes written (excluding the terminator), 0 if it did not fit.
 size_t csvHeader(char* out, size_t cap);
 size_t csvRow(char* out, size_t cap, const Record& r,

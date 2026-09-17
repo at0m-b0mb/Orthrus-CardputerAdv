@@ -121,6 +121,19 @@ size_t escapeXml(const char* in, char* out, size_t cap) {
     return used;
 }
 
+size_t sanitiseText(const char* in, char* out, size_t cap) {
+    if (out == nullptr || cap == 0) return 0;
+    if (in == nullptr) { out[0] = '\0'; return 0; }
+
+    size_t n = 0;
+    for (const char* p = in; *p && n + 1 < cap; p++) {
+        const unsigned char c = static_cast<unsigned char>(*p);
+        out[n++] = (c < 0x20 || c == 0x7F) ? ' ' : *p;
+    }
+    out[n] = '\0';
+    return n;
+}
+
 size_t csvHeader(char* out, size_t cap) {
     Writer w{out, cap};
     w.put("seq,time_ms,kind,detail,digest\n");
@@ -132,15 +145,20 @@ size_t csvRow(char* out, size_t cap, const Record& r,
     char hex[65] = {0};
     if (digest != nullptr) crypto::toHex(digest, hex);
 
-    // The detail is quoted and its own quotes doubled, per RFC 4180, so a
-    // comma or a quote in a payload fragment cannot shift the columns.
+    // Control bytes go first: a newline in a detail string would end the record
+    // half way through and let the rest masquerade as a new row.
+    char clean[kDetailLen];
+    sanitiseText(r.detail, clean, sizeof(clean));
+
+    // Then quoted with its own quotes doubled, per RFC 4180, so a comma or a
+    // quote in a payload fragment cannot shift the columns.
     char quoted[kDetailLen * 2 + 4];
     size_t q = 0;
     quoted[q++] = '"';
-    for (size_t i = 0; i < kDetailLen && r.detail[i]; i++) {
+    for (size_t i = 0; i < kDetailLen && clean[i]; i++) {
         if (q + 3 >= sizeof(quoted)) break;
-        if (r.detail[i] == '"') quoted[q++] = '"';
-        quoted[q++] = r.detail[i];
+        if (clean[i] == '"') quoted[q++] = '"';
+        quoted[q++] = clean[i];
     }
     quoted[q++] = '"';
     quoted[q]   = '\0';

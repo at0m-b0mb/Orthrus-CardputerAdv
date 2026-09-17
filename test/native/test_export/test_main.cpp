@@ -7,6 +7,7 @@
 
 #include <unity.h>
 
+#include <algorithm>
 #include <cstring>
 #include <string>
 
@@ -269,6 +270,58 @@ void test_csv_field_past_the_end_reports_false() {
     TEST_ASSERT_FALSE(csvField("a,b,c", 9, v, sizeof(v)));
 }
 
+// ---- regression: control bytes cannot break the file format ----------------
+
+void test_newline_in_detail_cannot_split_a_record() {
+    // THE regression. A fuzzer found this: a detail string containing a newline
+    // ended the CSV record half way through, so the rest of it masqueraded as a
+    // new row, the chain stopped verifying against the file, and a crafted
+    // payload could inject lines that read as genuine records.
+    const Record r = rec(1, RecordKind::Device,
+                         "dev=AA\n99,0,device,\"INJECTED\",deadbeef");
+    char out[512];
+    TEST_ASSERT_TRUE(csvRow(out, sizeof(out), r, nullptr) > 0);
+
+    const std::string s(out);
+    // Exactly one line ending, at the very end.
+    TEST_ASSERT_EQUAL_UINT32(1, static_cast<uint32_t>(
+        std::count(s.begin(), s.end(), '\n')));
+    TEST_ASSERT_EQUAL_CHAR('\n', s.back());
+}
+
+void test_carriage_return_also_neutralised() {
+    const Record r = rec(2, RecordKind::Note, "a\rb\tc");
+    char out[512];
+    csvRow(out, sizeof(out), r, nullptr);
+    const std::string s(out);
+    TEST_ASSERT_TRUE(s.find('\r') == std::string::npos);
+    TEST_ASSERT_TRUE(s.find('\t') == std::string::npos);
+}
+
+void test_sanitise_is_idempotent() {
+    // Applied at both the record and formatting layers, so it must be, or the
+    // chain digest and the bytes on the card would disagree.
+    char once[64], twice[64];
+    sanitiseText("a\nb\x01" "c", once, sizeof(once));
+    sanitiseText(once, twice, sizeof(twice));
+    TEST_ASSERT_EQUAL_STRING(once, twice);
+    TEST_ASSERT_EQUAL_STRING("a b c", once);
+}
+
+void test_sanitise_preserves_printable_text() {
+    char out[64];
+    sanitiseText("dev=AABB lat=51.5 lon=-0.1", out, sizeof(out));
+    TEST_ASSERT_EQUAL_STRING("dev=AABB lat=51.5 lon=-0.1", out);
+}
+
+void test_sanitise_bounds() {
+    char out[4];
+    TEST_ASSERT_EQUAL_UINT32(3, sanitiseText("abcdefgh", out, sizeof(out)));
+    TEST_ASSERT_EQUAL_STRING("abc", out);
+    TEST_ASSERT_EQUAL_UINT32(0, sanitiseText("x", out, 0));
+    TEST_ASSERT_EQUAL_UINT32(0, sanitiseText(nullptr, out, sizeof(out)));
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
 
@@ -302,6 +355,12 @@ int main(int, char**) {
     RUN_TEST(test_csv_field_unescapes_doubled_quotes);
     RUN_TEST(test_csv_field_round_trips_what_csvRow_wrote);
     RUN_TEST(test_csv_field_past_the_end_reports_false);
+
+    RUN_TEST(test_newline_in_detail_cannot_split_a_record);
+    RUN_TEST(test_carriage_return_also_neutralised);
+    RUN_TEST(test_sanitise_is_idempotent);
+    RUN_TEST(test_sanitise_preserves_printable_text);
+    RUN_TEST(test_sanitise_bounds);
 
     return UNITY_END();
 }

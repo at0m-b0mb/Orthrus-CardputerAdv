@@ -91,7 +91,14 @@ bool Recorder::note(RecordKind kind, const char* detail) {
     r.seq    = chain_.count();
     r.timeMs = millis();
     r.kind   = kind;
-    std::snprintf(r.detail, kDetailLen, "%s", detail ? detail : "");
+
+    // Sanitised before hashing, not after. The chain has to cover exactly the
+    // bytes that land on the card, and a control byte here would otherwise be
+    // stripped by the CSV writer and the digest would describe text that was
+    // never written.
+    char raw[kDetailLen];
+    std::snprintf(raw, sizeof(raw), "%s", detail ? detail : "");
+    sanitiseText(raw, r.detail, kDetailLen);
 
     // Build the line BEFORE advancing the chain. If the write fails the chain
     // must not move, or the digest held in memory would describe a record that
