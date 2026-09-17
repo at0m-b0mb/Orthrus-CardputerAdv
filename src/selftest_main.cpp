@@ -26,7 +26,7 @@
 #include "lorawan/phy.h"
 #include "lorawan/region.h"
 #include "hal/lora_radio.h"
-#include "modules/spectrum.h"
+#include "modules/lora_spectrum.h"
 #include "hal/rfid2.h"
 #include "credential/grade.h"
 #include "app/recorder.h"
@@ -252,7 +252,7 @@ void testSpectrumSweep() {
     check(radio.begin(), "LoraRadio begin");
     if (!radio.ready()) return;
 
-    static orthrus::modules::Spectrum spec;
+    static orthrus::modules::LoraSpectrum spec;
     spec.configure(863000000, 870000000);
     spec.reset();
 
@@ -264,10 +264,10 @@ void testSpectrumSweep() {
     check(spec.sweeps() >= 1, "completed a full sweep");
     Serial.printf("  [info] full sweep in %lu ms over %d bins\n",
                   static_cast<unsigned long>(elapsed),
-                  orthrus::modules::Spectrum::kBins);
+                  orthrus::modules::LoraSpectrum::kBins);
 
     int lo = 127, hi = -128;
-    for (int i = 0; i < orthrus::modules::Spectrum::kBins; i++) {
+    for (int i = 0; i < orthrus::modules::LoraSpectrum::kBins; i++) {
         const int v = spec.level(i);
         if (v < lo) lo = v;
         if (v > hi) hi = v;
@@ -279,15 +279,15 @@ void testSpectrumSweep() {
     }
     Serial.printf("  [info] trace %d to %d dBm across the band\n", lo, hi);
     check(hi > lo, "trace has frequency structure");
-    check(lo >= orthrus::modules::Spectrum::kFloorDbm &&
-          hi <= orthrus::modules::Spectrum::kCeilingDbm,
+    check(lo >= orthrus::modules::LoraSpectrum::kFloorDbm &&
+          hi <= orthrus::modules::LoraSpectrum::kCeilingDbm,
           "levels stay inside the display window");
 
     const int peak = spec.peakBin();
     Serial.printf("  [info] peak bin %d at %.2f MHz, %d dBm\n", peak,
                   spec.binFreqHz(peak) / 1e6, static_cast<int>(spec.hold(peak)));
     check(spec.binFreqHz(0) == 863000000, "first bin is the start frequency");
-    check(spec.binFreqHz(orthrus::modules::Spectrum::kBins - 1) == 870000000,
+    check(spec.binFreqHz(orthrus::modules::LoraSpectrum::kBins - 1) == 870000000,
           "last bin is the end frequency");
 }
 

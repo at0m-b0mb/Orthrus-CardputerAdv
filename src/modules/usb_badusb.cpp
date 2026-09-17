@@ -1,4 +1,4 @@
-#include "payload.h"
+#include "usb_badusb.h"
 
 #include <M5Cardputer.h>
 #include <SD.h>
@@ -35,7 +35,7 @@ constexpr uint16_t kDefaultKeyDelayMs = 12;
 
 }  // namespace
 
-bool Payload::begin() {
+bool UsbBadUsb::begin() {
     if (!hal::hidSupportedInBuild()) {
         view_ = View::NoHid;
         return true;
@@ -46,7 +46,7 @@ bool Payload::begin() {
     return true;
 }
 
-void Payload::scanFiles() {
+void UsbBadUsb::scanFiles() {
     fileCount_ = 0;
     File dir = SD.open(kPayloadDir);
     if (!dir || !dir.isDirectory()) {
@@ -71,7 +71,7 @@ void Payload::scanFiles() {
     dir.close();
 }
 
-void Payload::validate() {
+void UsbBadUsb::validate() {
     lineCount_ = actionCount_ = unknownCount_ = firstBadLine_ = 0;
     firstBadWord_[0] = '\0';
     validated_ = false;
@@ -108,7 +108,7 @@ void Payload::validate() {
     validated_ = true;
 }
 
-void Payload::execute() {
+void UsbBadUsb::execute() {
     ranLines_ = 0;
     sentKeys_ = 0;
     aborted_  = false;
@@ -125,7 +125,7 @@ void Payload::execute() {
     // Paint before blocking. The operator is standing over someone else's
     // machine and needs to see that this is running and how to stop it.
     ui::beginFrame();
-    ui::chrome("Payload", "RUNNING");
+    ui::chrome("BadUSB", "RUNNING");
     {
         auto& d = ui::gfx();
         d.setFont(kFaceIdentity);
@@ -213,10 +213,10 @@ void Payload::execute() {
     view_  = View::Done;
 }
 
-void Payload::drawNoHid() {
+void UsbBadUsb::drawNoHid() {
     ui::beginFrame();
     auto& d = ui::gfx();
-    ui::chrome("Payload", "unavailable");
+    ui::chrome("BadUSB", "unavailable");
 
     d.setFont(kFaceData);
     d.setTextDatum(top_left);
@@ -230,14 +230,14 @@ void Payload::drawNoHid() {
     ui::endFrame();
 }
 
-void Payload::drawList() {
+void UsbBadUsb::drawList() {
     ui::beginFrame();
     auto& d = ui::gfx();
 
     char right[16];
     std::snprintf(right, sizeof(right), "%u file%s",
                   static_cast<unsigned>(fileCount_), fileCount_ == 1 ? "" : "s");
-    ui::chrome("Payload", right);
+    ui::chrome("BadUSB", right);
 
     if (fileCount_ == 0) {
         d.setFont(kFaceData);
@@ -276,7 +276,7 @@ void Payload::drawList() {
     ui::endFrame();
 }
 
-void Payload::drawPreview() {
+void UsbBadUsb::drawPreview() {
     ui::beginFrame();
     auto& d = ui::gfx();
 
@@ -324,7 +324,7 @@ void Payload::drawPreview() {
     ui::endFrame();
 }
 
-void Payload::drawDone() {
+void UsbBadUsb::drawDone() {
     ui::beginFrame();
     ui::chrome(aborted_ ? "Aborted" : "Finished", files_[selected_]);
 
@@ -349,7 +349,7 @@ void Payload::drawDone() {
     ui::endFrame();
 }
 
-bool Payload::handleKeys() {
+bool UsbBadUsb::handleKeys() {
     if (!M5Cardputer.Keyboard.isChange() || !M5Cardputer.Keyboard.isPressed())
         return true;
 
@@ -409,7 +409,7 @@ bool Payload::handleKeys() {
     return true;
 }
 
-void Payload::run() {
+void UsbBadUsb::run() {
     for (;;) {
         M5Cardputer.update();
         if (!handleKeys()) {

@@ -26,7 +26,7 @@
 
 namespace orthrus::modules {
 
-class Payload {
+class UsbBadUsb {
 public:
     bool begin();
     void run();

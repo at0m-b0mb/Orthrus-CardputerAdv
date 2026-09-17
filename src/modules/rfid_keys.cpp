@@ -1,4 +1,4 @@
-#include "keys.h"
+#include "rfid_keys.h"
 
 #include <M5Cardputer.h>
 #include <SD.h>
@@ -44,15 +44,15 @@ void hexBytes(const uint8_t* p, size_t n, char* out, size_t cap) {
 
 }  // namespace
 
-Keys::Keys() : reader_(hal::sharedReader()) {}
+RfidKeys::RfidKeys() : reader_(hal::sharedReader()) {}
 
-bool Keys::begin() {
+bool RfidKeys::begin() {
     return hal::openSharedReader();
 }
 
 // ---- the card ---------------------------------------------------------------
 
-void Keys::pollCard() {
+void RfidKeys::pollCard() {
     if (sweeping_) return;
     if (millis() - lastPollMs_ < kPollMs) return;
     lastPollMs_ = millis();
@@ -87,7 +87,7 @@ void Keys::pollCard() {
     reader_.halt();
 }
 
-void Keys::startSweep() {
+void RfidKeys::startSweep() {
     if (!haveCard_ || sectorTotal_ == 0) return;
     for (uint8_t i = 0; i < kMaxSectors; i++) sectors_[i] = SectorResult{};
     opened_   = 0;
@@ -96,7 +96,7 @@ void Keys::startSweep() {
     view_     = View::Sweeping;
 }
 
-void Keys::stepSweep() {
+void RfidKeys::stepSweep() {
     if (!sweeping_) return;
 
     if (sweepAt_ >= sectorTotal_) {
@@ -146,7 +146,7 @@ void Keys::stepSweep() {
 
 // ---- export -----------------------------------------------------------------
 
-bool Keys::saveDump() {
+bool RfidKeys::saveDump() {
     saveOk_      = false;
     savedBlocks_ = 0;
 
@@ -215,7 +215,7 @@ bool Keys::saveDump() {
 
 // ---- screens ----------------------------------------------------------------
 
-void Keys::sectorGrid(int x, int y, int maxWidth) {
+void RfidKeys::sectorGrid(int x, int y, int maxWidth) {
     auto& d = ui::gfx();
     if (sectorTotal_ == 0) return;
 
@@ -250,10 +250,10 @@ void Keys::sectorGrid(int x, int y, int maxWidth) {
     (void)rows;
 }
 
-void Keys::drawWaiting() {
+void RfidKeys::drawWaiting() {
     ui::beginFrame();
     auto& d = ui::gfx();
-    ui::chrome("Keys", reader_.present() ? "reader ok" : "no reader");
+    ui::chrome("Test Keys", reader_.present() ? "reader ok" : "no reader");
 
     d.setFont(kFaceData);
     d.setTextDatum(top_left);
@@ -268,13 +268,13 @@ void Keys::drawWaiting() {
     ui::endFrame();
 }
 
-void Keys::drawCard() {
+void RfidKeys::drawCard() {
     ui::beginFrame();
     auto& d = ui::gfx();
 
     char uid[24];
     hexBytes(tag_.uid, tag_.uidLen, uid, sizeof(uid));
-    ui::chrome("Keys", uid);
+    ui::chrome("Test Keys", uid);
 
     d.setFont(kFaceData);
     ui::textAt(8, kBodyTop + 6, kText, "%s", cr::familyName(tag_.family()));
@@ -302,7 +302,7 @@ void Keys::drawCard() {
     ui::endFrame();
 }
 
-void Keys::drawSweeping() {
+void RfidKeys::drawSweeping() {
     ui::beginFrame();
     auto& d = ui::gfx();
 
@@ -332,7 +332,7 @@ void Keys::drawSweeping() {
     ui::endFrame();
 }
 
-void Keys::drawMap() {
+void RfidKeys::drawMap() {
     ui::beginFrame();
     auto& d = ui::gfx();
 
@@ -370,7 +370,7 @@ void Keys::drawMap() {
     ui::endFrame();
 }
 
-void Keys::drawSector() {
+void RfidKeys::drawSector() {
     if (selected_ < 0 || selected_ >= sectorTotal_) {
         view_ = View::Map;
         return;
@@ -425,7 +425,7 @@ void Keys::drawSector() {
     ui::endFrame();
 }
 
-void Keys::drawSaved() {
+void RfidKeys::drawSaved() {
     ui::beginFrame();
     auto& d = ui::gfx();
     ui::chrome("Export");
@@ -453,7 +453,7 @@ void Keys::drawSaved() {
     ui::endFrame();
 }
 
-bool Keys::handleKeys() {
+bool RfidKeys::handleKeys() {
     if (!M5Cardputer.Keyboard.isChange() || !M5Cardputer.Keyboard.isPressed())
         return true;
 
@@ -511,7 +511,7 @@ bool Keys::handleKeys() {
     return true;
 }
 
-void Keys::run() {
+void RfidKeys::run() {
     lastDrawMs_ = 0;
 
     for (;;) {

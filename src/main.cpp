@@ -21,17 +21,17 @@
 #include "app/ui.h"
 #include "hal/board.h"
 #include "hal/hid.h"
-#include "modules/airspace.h"
-#include "modules/control.h"
-#include "modules/credentials.h"
-#include "modules/engagement.h"
-#include "modules/harvest.h"
-#include "modules/instruments.h"
-#include "modules/keys.h"
-#include "modules/payload.h"
-#include "modules/perimeter.h"
-#include "modules/position.h"
-#include "modules/proximity.h"
+#include "modules/lora_devices.h"
+#include "modules/ir_send.h"
+#include "modules/nfc_read.h"
+#include "modules/sys_evidence.h"
+#include "modules/wifi_handshakes.h"
+#include "modules/sys_diagnostics.h"
+#include "modules/rfid_keys.h"
+#include "modules/usb_badusb.h"
+#include "modules/wifi_networks.h"
+#include "modules/gps_location.h"
+#include "modules/ble_devices.h"
 
 using namespace orthrus::theme;
 namespace bd = orthrus::board;
@@ -50,18 +50,26 @@ constexpr char kKeyBack  = '`';
 
 // ---- what the device can do -------------------------------------------------
 
+// One value per tool. The names here match the names on the screen, so that
+// reading the menu and reading this file are the same exercise.
 enum class Tool : uint8_t {
-    Perimeter = 0,
-    Harvest,
-    Proximity,
-    Credentials,
-    Keys,
-    Control,
-    Airspace,
-    Position,
-    Payload,
-    Engagement,
-    Instruments,
+    WifiNetworks = 0,
+    WifiHandshakes,
+    WifiClients,
+    BleDevices,
+    BleServices,
+    NfcReadCard,
+    RfidTestKeys,
+    RfidClone,
+    IrSend,
+    IrLearn,
+    LoraDevices,
+    LoraSpectrum,
+    GpsLocation,
+    UsbBadUsb,
+    SysEvidence,
+    SysDiagnostics,
+    SysFiles,
 };
 
 struct ToolEntry {
@@ -78,42 +86,57 @@ struct Category {
     uint8_t          count;
 };
 
+// NAMES ARE THE PRODUCT.
+//
+// These used to be evocative -- Airspace, Perimeter, Credentials -- and an
+// operator holding the device for the first time could not tell which one found
+// Wi-Fi networks. The category tile already says which radio you are pointing
+// at, so a tool name only has to say what it DOES. Every one below is a plain
+// noun or verb, and every description is a sentence somebody could say out
+// loud.
+
 const ToolEntry kWifiTools[] = {
-    {Tool::Perimeter, "Perimeter", "Survey, graded and mapped",     true},
-    {Tool::Harvest,   "Harvest",   "WPA handshake and PMKID capture", true},
+    {Tool::WifiNetworks,   "Networks",   "Find networks and grade them",        true},
+    {Tool::WifiHandshakes, "Handshakes", "Capture WPA handshakes to crack later", true},
+    {Tool::WifiClients,    "Clients",    "See devices and the networks they seek", true},
 };
 
 const ToolEntry kBluetoothTools[] = {
-    {Tool::Proximity, "Proximity", "BLE device and tracker recon", true},
+    {Tool::BleDevices,  "Devices",  "Find BLE devices and hidden trackers", true},
+    {Tool::BleServices, "Services", "Connect and list what a device exposes", false},
 };
 
 const ToolEntry kNfcTools[] = {
-    {Tool::Credentials, "Credentials", "13.56 MHz badge identify and grade", true},
+    {Tool::NfcReadCard, "Read Card", "Identify a badge and grade its exposure", true},
 };
 
 const ToolEntry kRfidTools[] = {
-    {Tool::Keys, "Keys", "Mifare Classic sector key sweep", true},
+    {Tool::RfidTestKeys, "Test Keys", "Try every published key on every sector", true},
+    {Tool::RfidClone,    "Clone",     "Copy a card onto a blank you own",        false},
 };
 
 const ToolEntry kInfraredTools[] = {
-    {Tool::Control, "Control", "Room control, onboard emitter", true},
+    {Tool::IrSend,  "Send",  "Send remote codes to a TV, projector or AC", true},
+    {Tool::IrLearn, "Learn", "Capture a real remote's code, then replay it", false},
 };
 
 const ToolEntry kLoraTools[] = {
-    {Tool::Airspace, "Airspace", "LoRa and LoRaWAN device census", true},
+    {Tool::LoraDevices,  "Devices",  "Find LoRaWAN devices and grade them",   true},
+    {Tool::LoraSpectrum, "Spectrum", "See what is transmitting across the band", true},
 };
 
 const ToolEntry kGpsTools[] = {
-    {Tool::Position, "Position", "Live fix, waypoints and track log", true},
+    {Tool::GpsLocation, "Location", "Live fix, waypoints and track log", true},
 };
 
 const ToolEntry kUsbTools[] = {
-    {Tool::Payload, "Payload", "USB keyboard scripts from the card", true},
+    {Tool::UsbBadUsb, "BadUSB", "Type a scripted payload into a computer", true},
 };
 
 const ToolEntry kSystemTools[] = {
-    {Tool::Engagement,  "Engagement",  "Evidence log, chain head, export", true},
-    {Tool::Instruments, "Instruments", "Live power, radio, GNSS and tilt", true},
+    {Tool::SysEvidence,    "Evidence",    "Session log, chain digest, KML export", true},
+    {Tool::SysDiagnostics, "Diagnostics", "Battery, radio, GPS and sensors, live", true},
+    {Tool::SysFiles,       "Files",       "Browse what is on the microSD card",    false},
 };
 
 #define CAT(arr) arr, static_cast<uint8_t>(sizeof(arr) / sizeof(arr[0]))
@@ -341,12 +364,12 @@ void openTool(const ToolEntry& entry) {
     }
 
     switch (entry.tool) {
-        case Tool::Airspace: {
+        case Tool::LoraDevices: {
             // Static: the census table is ~13 KB and has no business on the
             // loop task's 8 KB stack.
-            static orthrus::modules::Airspace airspace;
+            static orthrus::modules::LoraDevices airspace;
             if (!airspace.begin()) {
-                failure("Airspace", "Radio did not start.",
+                failure("LoRa", "Radio did not start.",
                         "Check the LoRa cap is seated",
                         "and the antenna is fitted.");
                 return;
@@ -355,19 +378,19 @@ void openTool(const ToolEntry& entry) {
             return;
         }
 
-        case Tool::Perimeter: {
-            static orthrus::modules::Perimeter perimeter;
+        case Tool::WifiNetworks: {
+            static orthrus::modules::WifiNetworks perimeter;
             perimeter.begin();
             perimeter.run();
             return;
         }
 
-        case Tool::Harvest: {
+        case Tool::WifiHandshakes: {
             // Static: the target table is ~7 KB, for the same reason Airspace
             // is static.
-            static orthrus::modules::Harvest harvest;
+            static orthrus::modules::WifiHandshakes harvest;
             if (!harvest.begin()) {
-                failure("Harvest", "Monitor mode did not start.",
+                failure("Handshakes", "Monitor mode did not start.",
                         "The Wi-Fi radio refused promiscuous",
                         "mode. Power cycle and try again.");
                 return;
@@ -376,10 +399,10 @@ void openTool(const ToolEntry& entry) {
             return;
         }
 
-        case Tool::Proximity: {
-            static orthrus::modules::Proximity proximity;
+        case Tool::BleDevices: {
+            static orthrus::modules::BleDevices proximity;
             if (!proximity.begin()) {
-                failure("Proximity", "Bluetooth did not start.",
+                failure("Devices", "Bluetooth did not start.",
                         "The BLE stack refused to come up.",
                         "Power cycle and try again.");
                 return;
@@ -388,10 +411,10 @@ void openTool(const ToolEntry& entry) {
             return;
         }
 
-        case Tool::Credentials: {
-            static orthrus::modules::Credentials credentials;
+        case Tool::NfcReadCard: {
+            static orthrus::modules::NfcRead credentials;
             if (!credentials.begin()) {
-                failure("Credentials", "No reader found.",
+                failure("Read Card", "No reader found.",
                         "Plug an RFID2 unit into either",
                         "Grove port: board or LoRa cap.");
                 return;
@@ -400,10 +423,10 @@ void openTool(const ToolEntry& entry) {
             return;
         }
 
-        case Tool::Keys: {
-            static orthrus::modules::Keys keys;
+        case Tool::RfidTestKeys: {
+            static orthrus::modules::RfidKeys keys;
             if (!keys.begin()) {
-                failure("Keys", "No reader found.",
+                failure("Test Keys", "No reader found.",
                         "Plug an RFID2 unit into either",
                         "Grove port: board or LoRa cap.");
                 return;
@@ -412,36 +435,36 @@ void openTool(const ToolEntry& entry) {
             return;
         }
 
-        case Tool::Control: {
-            static orthrus::modules::Control control;
+        case Tool::IrSend: {
+            static orthrus::modules::IrSend control;
             control.begin();
             control.run();
             return;
         }
 
-        case Tool::Position: {
-            static orthrus::modules::Position position;
+        case Tool::GpsLocation: {
+            static orthrus::modules::GpsLocation position;
             position.begin();
             position.run();
             return;
         }
 
-        case Tool::Engagement: {
-            static orthrus::modules::Engagement engagement;
+        case Tool::SysEvidence: {
+            static orthrus::modules::SysEvidence engagement;
             engagement.begin();
             engagement.run();
             return;
         }
 
-        case Tool::Payload: {
-            static orthrus::modules::Payload payload;
+        case Tool::UsbBadUsb: {
+            static orthrus::modules::UsbBadUsb payload;
             payload.begin();
             payload.run();
             return;
         }
 
-        case Tool::Instruments: {
-            static orthrus::modules::Instruments instruments;
+        case Tool::SysDiagnostics: {
+            static orthrus::modules::SysDiagnostics instruments;
             instruments.begin();
             instruments.run();
             return;

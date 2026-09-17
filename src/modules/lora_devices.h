@@ -19,11 +19,11 @@
 #include "lorawan/census.h"
 #include "lorawan/findings.h"
 #include "lorawan/region.h"
-#include "spectrum.h"
+#include "lora_spectrum.h"
 
 namespace orthrus::modules {
 
-class Airspace {
+class LoraDevices {
 public:
     bool begin();
     void run();  // returns when the operator backs out
@@ -65,7 +65,7 @@ private:
 
     hal::Gnss&        gnss_  = hal::sharedGnss();
     hal::LoraRadio&   radio_ = hal::sharedRadio();
-    Spectrum          spectrum_;
+    LoraSpectrum spectrum_;
     lorawan::Census   census_;
     lorawan::Region   region_ = lorawan::Region::EU868;
 

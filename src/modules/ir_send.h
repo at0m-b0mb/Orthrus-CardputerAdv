@@ -24,7 +24,7 @@
 
 namespace orthrus::modules {
 
-class Control {
+class IrSend {
 public:
     bool begin();
     void run();

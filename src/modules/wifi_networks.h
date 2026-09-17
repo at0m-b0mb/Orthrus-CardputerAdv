@@ -18,7 +18,7 @@
 
 namespace orthrus::modules {
 
-class Perimeter {
+class WifiNetworks {
 public:
     bool begin();
     void run();

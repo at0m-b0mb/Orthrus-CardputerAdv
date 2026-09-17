@@ -1,4 +1,4 @@
-#include "spectrum.h"
+#include "lora_spectrum.h"
 
 #include <M5Cardputer.h>
 
@@ -12,14 +12,14 @@ using namespace orthrus::theme;
 namespace {
 
 int8_t clampDbm(float v) {
-    if (v < Spectrum::kFloorDbm) return Spectrum::kFloorDbm;
-    if (v > Spectrum::kCeilingDbm) return Spectrum::kCeilingDbm;
+    if (v < LoraSpectrum::kFloorDbm) return LoraSpectrum::kFloorDbm;
+    if (v > LoraSpectrum::kCeilingDbm) return LoraSpectrum::kCeilingDbm;
     return static_cast<int8_t>(v);
 }
 
 }  // namespace
 
-void Spectrum::configure(uint32_t fromHz, uint32_t toHz) {
+void LoraSpectrum::configure(uint32_t fromHz, uint32_t toHz) {
     if (toHz <= fromHz) return;
     if (startHz_ == fromHz && endHz_ == toHz) return;
     startHz_ = fromHz;
@@ -27,7 +27,7 @@ void Spectrum::configure(uint32_t fromHz, uint32_t toHz) {
     reset();
 }
 
-void Spectrum::reset() {
+void LoraSpectrum::reset() {
     for (int i = 0; i < kBins; i++) {
         bins_[i] = kFloorDbm;
         hold_[i] = kFloorDbm;
@@ -36,7 +36,7 @@ void Spectrum::reset() {
     sweeps_ = 0;
 }
 
-uint32_t Spectrum::binFreqHz(int bin) const {
+uint32_t LoraSpectrum::binFreqHz(int bin) const {
     if (bin < 0) bin = 0;
     if (bin >= kBins) bin = kBins - 1;
     const uint64_t span = static_cast<uint64_t>(endHz_ - startHz_);
@@ -44,7 +44,7 @@ uint32_t Spectrum::binFreqHz(int bin) const {
                                             static_cast<uint64_t>(kBins - 1));
 }
 
-bool Spectrum::step(hal::LoraRadio& radio, int points) {
+bool LoraSpectrum::step(hal::LoraRadio& radio, int points) {
     bool wrapped = false;
 
     for (int i = 0; i < points; i++) {
@@ -68,7 +68,7 @@ bool Spectrum::step(hal::LoraRadio& radio, int points) {
     return wrapped;
 }
 
-int Spectrum::peakBin() const {
+int LoraSpectrum::peakBin() const {
     int best = 0;
     for (int i = 1; i < kBins; i++) {
         if (hold_[i] > hold_[best]) best = i;
@@ -76,7 +76,7 @@ int Spectrum::peakBin() const {
     return best;
 }
 
-void Spectrum::draw(int x, int y, int w, int h) const {
+void LoraSpectrum::draw(int x, int y, int w, int h) const {
     auto& d = ui::gfx();
 
     const int span = kCeilingDbm - kFloorDbm;  // 68 dB

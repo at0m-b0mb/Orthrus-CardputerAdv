@@ -1,4 +1,4 @@
-#include "instruments.h"
+#include "sys_diagnostics.h"
 
 #include <M5Cardputer.h>
 
@@ -27,7 +27,7 @@ constexpr char kKeyBack = '`';
 
 }  // namespace
 
-bool Instruments::begin() {
+bool SysDiagnostics::begin() {
     gnss_.begin();
     // The radio is optional here. If the cap is missing, every other reading
     // still works and the radio line says so rather than the screen refusing.
@@ -38,7 +38,7 @@ bool Instruments::begin() {
     return true;
 }
 
-void Instruments::sample() {
+void SysDiagnostics::sample() {
     if (millis() - lastSampleMs_ < kSampleMs) return;
     lastSampleMs_ = millis();
 
@@ -62,7 +62,7 @@ void Instruments::sample() {
 // the same reason the coverage grid is Airspace's: it is made of real sensor
 // data, it moves the instant you tilt the device, and nothing else on the
 // screen proves quite so immediately that the hardware is alive.
-void Instruments::drawBubble(int cx, int cy, int r) {
+void SysDiagnostics::drawBubble(int cx, int cy, int r) {
     auto& d = ui::gfx();
 
     d.drawCircle(cx, cy, r, kRule);
@@ -85,13 +85,13 @@ void Instruments::drawBubble(int cx, int cy, int r) {
     d.fillCircle(cx + bx, cy - by, 3, level ? kGood : kShine);
 }
 
-void Instruments::draw() {
+void SysDiagnostics::draw() {
     ui::beginFrame();
     auto& d = ui::gfx();
 
     char right[16];
     std::snprintf(right, sizeof(right), "%d%%", M5.Power.getBatteryLevel());
-    ui::chrome("Instruments", right);
+    ui::chrome("Diagnostics", right);
 
     d.setFont(kFaceData);
     int y = kBodyTop + 6;
@@ -164,7 +164,7 @@ void Instruments::draw() {
     ui::endFrame();
 }
 
-void Instruments::run() {
+void SysDiagnostics::run() {
     for (;;) {
         M5Cardputer.update();
         sample();

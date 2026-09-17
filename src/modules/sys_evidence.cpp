@@ -1,4 +1,4 @@
-#include "engagement.h"
+#include "sys_evidence.h"
 
 #include <M5Cardputer.h>
 #include <SD.h>
@@ -26,13 +26,13 @@ constexpr int  kValueX  = 234;
 constexpr char kKeyBack = '`';
 }  // namespace
 
-bool Engagement::begin() {
+bool SysEvidence::begin() {
     gnss_.begin();
     app::recorder().begin();  // a missing card is a state, not a failure
     return true;
 }
 
-void Engagement::exportKml() {
+void SysEvidence::exportKml() {
     const auto& rec = app::recorder();
     if (!rec.active()) {
         resultOk_ = false;
@@ -143,12 +143,12 @@ void Engagement::exportKml() {
     view_ = View::Result;
 }
 
-void Engagement::draw() {
+void SysEvidence::draw() {
     ui::beginFrame();
     auto& d = ui::gfx();
     auto& rec = app::recorder();
 
-    ui::chrome("Engagement", rec.active() ? "logging" : "no card");
+    ui::chrome("Evidence", rec.active() ? "logging" : "no card");
 
     d.setFont(kFaceData);
     int y = kBodyTop + 6;
@@ -214,7 +214,7 @@ void Engagement::draw() {
     ui::endFrame();
 }
 
-void Engagement::drawResult() {
+void SysEvidence::drawResult() {
     ui::beginFrame();
     auto& d = ui::gfx();
     ui::chrome(resultTitle_);
@@ -227,7 +227,7 @@ void Engagement::drawResult() {
     ui::endFrame();
 }
 
-bool Engagement::handleKeys() {
+bool SysEvidence::handleKeys() {
     if (!M5Cardputer.Keyboard.isChange() || !M5Cardputer.Keyboard.isPressed())
         return true;
 
@@ -251,7 +251,7 @@ bool Engagement::handleKeys() {
     return true;
 }
 
-void Engagement::run() {
+void SysEvidence::run() {
     for (;;) {
         M5Cardputer.update();
         gnss_.pump();

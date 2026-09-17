@@ -1,4 +1,4 @@
-#include "airspace.h"
+#include "lora_devices.h"
 
 #include <M5Cardputer.h>
 
@@ -47,7 +47,7 @@ uint8_t popcount64(uint64_t v) {
 
 }  // namespace
 
-bool Airspace::begin() {
+bool LoraDevices::begin() {
     if (!radio_.begin()) return false;
     gnss_.begin();
     for (uint8_t i = 0; i < kTraceLen; i++) rssiTrace_[i] = -120;
@@ -63,7 +63,7 @@ bool Airspace::begin() {
     return radio_.listen();
 }
 
-void Airspace::retune() {
+void LoraDevices::retune() {
     const lw::ChannelPlan& p = lw::plan(region_);
     const uint8_t sweep = lw::sweepableChannels(region_);
     if (chIndex_ >= sweep) chIndex_ = 0;
@@ -82,23 +82,23 @@ void Airspace::retune() {
     if (sfIndex_ < 64) visitedSfs_ |= (1ULL << sfIndex_);
 }
 
-void Airspace::advanceHop() {
+void LoraDevices::advanceHop() {
     const uint8_t sweep = lw::sweepableChannels(region_);
     chIndex_ = static_cast<uint8_t>((chIndex_ + 1) % (sweep ? sweep : 1));
     retune();
 }
 
-uint8_t Airspace::coveredChannels() const {
+uint8_t LoraDevices::coveredChannels() const {
     const uint8_t n = popcount64(visitedChannels_);
     return n ? n : 1;
 }
 
-uint8_t Airspace::coveredSpreadingFactors() const {
+uint8_t LoraDevices::coveredSpreadingFactors() const {
     const uint8_t n = popcount64(visitedSfs_);
     return n ? n : 1;
 }
 
-lw::CaptureContext Airspace::context() const {
+lw::CaptureContext LoraDevices::context() const {
     const lw::ChannelPlan& p = lw::plan(region_);
     lw::CaptureContext c;
     c.listenedMs       = millis() - startedMs_;
@@ -111,7 +111,7 @@ lw::CaptureContext Airspace::context() const {
     return c;
 }
 
-void Airspace::logDevice(const lw::DeviceRecord& rec, const lw::RxMeta& meta) {
+void LoraDevices::logDevice(const lw::DeviceRecord& rec, const lw::RxMeta& meta) {
     auto& r = app::recorder();
     if (!r.active()) return;
 
@@ -141,7 +141,7 @@ void Airspace::logDevice(const lw::DeviceRecord& rec, const lw::RxMeta& meta) {
     r.noteDevice(detail);
 }
 
-void Airspace::sampleRssi() {
+void LoraDevices::sampleRssi() {
     if (millis() - lastRssiMs_ < 60) return;
     lastRssiMs_ = millis();
 
@@ -158,7 +158,7 @@ void Airspace::sampleRssi() {
     if (rssiPos_ == 0) traceFull_ = true;
 }
 
-void Airspace::pump() {
+void LoraDevices::pump() {
     gnss_.pump();
     sampleRssi();
 
@@ -204,7 +204,7 @@ void Airspace::pump() {
     }
 }
 
-void Airspace::drawLive() {
+void LoraDevices::drawLive() {
     ui::beginFrame();
     auto& d = ui::gfx();
     const lw::ChannelPlan& p = lw::plan(region_);
@@ -212,7 +212,7 @@ void Airspace::drawLive() {
 
     char right[20];
     std::snprintf(right, sizeof(right), "%s %s", p.name, hopping_ ? "HOP" : "PARK");
-    ui::chrome("Airspace", right);
+    ui::chrome("LoRa", right);
 
     d.setFont(kFaceData);
 
@@ -287,7 +287,7 @@ void Airspace::drawLive() {
     ui::endFrame();
 }
 
-void Airspace::drawCensus() {
+void LoraDevices::drawCensus() {
     ui::beginFrame();
     auto& d = ui::gfx();
 
@@ -363,7 +363,7 @@ void Airspace::drawCensus() {
     ui::endFrame();
 }
 
-void Airspace::drawDossier() {
+void LoraDevices::drawDossier() {
     if (census_.size() == 0) {
         view_ = View::Census;
         return;
@@ -445,7 +445,7 @@ void Airspace::drawDossier() {
     ui::endFrame();
 }
 
-void Airspace::drawSpectrum() {
+void LoraDevices::drawSpectrum() {
     ui::beginFrame();
     const lw::ChannelPlan& p = lw::plan(region_);
 
@@ -455,7 +455,7 @@ void Airspace::drawSpectrum() {
     ui::chrome("Spectrum", right);
 
     constexpr int kGraphX = 4, kGraphY = 22, kGraphH = 68;
-    const int graphW = Spectrum::kBins * 2;
+    const int graphW = LoraSpectrum::kBins * 2;
     spectrum_.draw(kGraphX, kGraphY, graphW, kGraphH);
 
     // Axis ends, so the trace means something without counting pixels.
@@ -479,7 +479,7 @@ void Airspace::drawSpectrum() {
     ui::endFrame();
 }
 
-bool Airspace::handleKeys() {
+bool LoraDevices::handleKeys() {
     if (!M5Cardputer.Keyboard.isChange() || !M5Cardputer.Keyboard.isPressed())
         return true;
 
@@ -576,7 +576,7 @@ bool Airspace::handleKeys() {
     return true;
 }
 
-void Airspace::run() {
+void LoraDevices::run() {
     for (;;) {
         M5Cardputer.update();
 

@@ -26,7 +26,7 @@
 
 namespace orthrus::modules {
 
-class Position {
+class GpsLocation {
 public:
     bool begin();
     void run();

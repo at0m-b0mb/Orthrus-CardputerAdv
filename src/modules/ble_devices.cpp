@@ -1,4 +1,4 @@
-#include "proximity.h"
+#include "ble_devices.h"
 
 #include <M5Cardputer.h>
 #include <NimBLEDevice.h>
@@ -117,7 +117,7 @@ uint16_t kindColour(ble::Kind k) {
 
 }  // namespace
 
-bool Proximity::begin() {
+bool BleDevices::begin() {
     count_ = 0;
     for (uint8_t i = 0; i < kMaxDevices; i++) devices_[i] = Device{};
     g_head = g_tail = 0;
@@ -142,14 +142,14 @@ bool Proximity::begin() {
     return true;
 }
 
-int Proximity::find(const uint8_t addr[ble::kAddrLen]) const {
+int BleDevices::find(const uint8_t addr[ble::kAddrLen]) const {
     for (uint8_t i = 0; i < count_; i++)
         if (std::memcmp(devices_[i].addr, addr, ble::kAddrLen) == 0)
             return static_cast<int>(i);
     return -1;
 }
 
-void Proximity::ingest(const uint8_t addr[ble::kAddrLen], bool randomAddress,
+void BleDevices::ingest(const uint8_t addr[ble::kAddrLen], bool randomAddress,
                        int8_t rssi, const uint8_t* payload, size_t payloadLen) {
     ble::Advert a;
     ble::parseAdvert(payload, payloadLen, a);
@@ -220,7 +220,7 @@ void Proximity::ingest(const uint8_t addr[ble::kAddrLen], bool randomAddress,
     }
 }
 
-void Proximity::drain() {
+void BleDevices::drain() {
     for (int budget = 0; budget < 8; budget++) {
         if (g_tail == g_head) return;
         const Slot& s = g_ring[g_tail];
@@ -231,7 +231,7 @@ void Proximity::drain() {
 
 // ---- filtering ---------------------------------------------------------------
 
-int Proximity::visibleCount() const {
+int BleDevices::visibleCount() const {
     if (!trackersOnly_) return count_;
     int n = 0;
     for (uint8_t i = 0; i < count_; i++)
@@ -239,7 +239,7 @@ int Proximity::visibleCount() const {
     return n;
 }
 
-int Proximity::visibleAt(int i) const {
+int BleDevices::visibleAt(int i) const {
     if (!trackersOnly_) return i;
     int n = 0;
     for (uint8_t k = 0; k < count_; k++) {
@@ -252,7 +252,7 @@ int Proximity::visibleAt(int i) const {
 
 // ---- screens -----------------------------------------------------------------
 
-void Proximity::drawList() {
+void BleDevices::drawList() {
     ui::beginFrame();
     auto& d = ui::gfx();
 
@@ -261,7 +261,7 @@ void Proximity::drawList() {
     char right[24];
     std::snprintf(right, sizeof(right), "%d%s%s", visible,
                   trackersOnly_ ? " tag" : " dev", activeScan_ ? " A" : "");
-    ui::chrome("Proximity", right);
+    ui::chrome("Devices", right);
 
     if (visible == 0) {
         d.setFont(kFaceData);
@@ -335,7 +335,7 @@ void Proximity::drawList() {
     ui::endFrame();
 }
 
-void Proximity::drawDetail() {
+void BleDevices::drawDetail() {
     const int visible = visibleCount();
     if (visible == 0) {
         view_ = View::List;
@@ -391,7 +391,7 @@ void Proximity::drawDetail() {
     ui::endFrame();
 }
 
-bool Proximity::handleKeys() {
+bool BleDevices::handleKeys() {
     if (!M5Cardputer.Keyboard.isChange() || !M5Cardputer.Keyboard.isPressed())
         return true;
 
@@ -441,7 +441,7 @@ bool Proximity::handleKeys() {
     return true;
 }
 
-void Proximity::run() {
+void BleDevices::run() {
     lastDrawMs_ = 0;
 
     for (;;) {

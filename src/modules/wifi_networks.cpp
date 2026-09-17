@@ -1,4 +1,4 @@
-#include "perimeter.h"
+#include "wifi_networks.h"
 
 #include <M5Cardputer.h>
 #include <WiFi.h>
@@ -64,7 +64,7 @@ void signalBars(int x, int y, int16_t rssi, uint16_t colour) {
 
 }  // namespace
 
-bool Perimeter::begin() {
+bool WifiNetworks::begin() {
     gnss_.begin();
     WiFi.mode(WIFI_STA);
     WiFi.disconnect(false, false);
@@ -72,14 +72,14 @@ bool Perimeter::begin() {
     return true;
 }
 
-int Perimeter::findByBssid(const uint8_t bssid[wf::kBssidLen]) const {
+int WifiNetworks::findByBssid(const uint8_t bssid[wf::kBssidLen]) const {
     for (uint8_t i = 0; i < count_; i++)
         if (std::memcmp(nets_[i].bssid, bssid, wf::kBssidLen) == 0)
             return static_cast<int>(i);
     return -1;
 }
 
-uint8_t Perimeter::duplicatesOf(const wf::Network& n) const {
+uint8_t WifiNetworks::duplicatesOf(const wf::Network& n) const {
     // A hidden network has no name to duplicate, and counting every unnamed
     // beacon as a twin of every other would flag whole streets.
     if (n.hidden()) return 0;
@@ -92,7 +92,7 @@ uint8_t Perimeter::duplicatesOf(const wf::Network& n) const {
     return dup;
 }
 
-void Perimeter::logNetwork(const wf::Network& n) {
+void WifiNetworks::logNetwork(const wf::Network& n) {
     auto& r = app::recorder();
     if (!r.active()) return;
 
@@ -117,7 +117,7 @@ void Perimeter::logNetwork(const wf::Network& n) {
     r.noteDevice(detail);
 }
 
-void Perimeter::harvest() {
+void WifiNetworks::harvest() {
     const int found = WiFi.scanComplete();
     if (found < 0) return;  // still running, or failed
 
@@ -155,7 +155,7 @@ void Perimeter::harvest() {
     sweeps_++;
 }
 
-void Perimeter::pump() {
+void WifiNetworks::pump() {
     gnss_.pump();
 
     if (scanning_) {
@@ -177,14 +177,14 @@ void Perimeter::pump() {
     }
 }
 
-void Perimeter::drawList() {
+void WifiNetworks::drawList() {
     ui::beginFrame();
     auto& d = ui::gfx();
 
     char right[24];
     std::snprintf(right, sizeof(right), "%u AP %s", static_cast<unsigned>(count_),
                   scanning_ ? "scan" : "    ");
-    ui::chrome("Perimeter", right);
+    ui::chrome("Networks", right);
 
     if (count_ == 0) {
         d.setFont(kFaceData);
@@ -243,7 +243,7 @@ void Perimeter::drawList() {
     ui::endFrame();
 }
 
-void Perimeter::drawDossier() {
+void WifiNetworks::drawDossier() {
     if (count_ == 0 || selected_ < 0 || selected_ >= static_cast<int>(count_)) {
         view_ = View::List;
         return;
@@ -307,7 +307,7 @@ void Perimeter::drawDossier() {
     ui::endFrame();
 }
 
-bool Perimeter::handleKeys() {
+bool WifiNetworks::handleKeys() {
     if (!M5Cardputer.Keyboard.isChange() || !M5Cardputer.Keyboard.isPressed())
         return true;
 
@@ -336,7 +336,7 @@ bool Perimeter::handleKeys() {
     return true;
 }
 
-void Perimeter::run() {
+void WifiNetworks::run() {
     scanStarted_ = millis() - kRescanMs;  // scan immediately on entry
 
     for (;;) {

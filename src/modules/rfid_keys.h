@@ -32,9 +32,9 @@
 
 namespace orthrus::modules {
 
-class Keys {
+class RfidKeys {
 public:
-    Keys();
+    RfidKeys();
 
     bool begin();
     void run();

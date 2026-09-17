@@ -1,4 +1,4 @@
-#include "control.h"
+#include "ir_send.h"
 
 #include <M5Cardputer.h>
 
@@ -31,11 +31,11 @@ constexpr int kProtocolCount = static_cast<int>(ir::Protocol::Rc5) + 1;
 
 }  // namespace
 
-bool Control::begin() {
+bool IrSend::begin() {
     return tx_.begin();
 }
 
-void Control::adjust(int delta) {
+void IrSend::adjust(int delta) {
     switch (field_) {
         case Field::Protocol: {
             int p = static_cast<int>(protocol_) + delta;
@@ -76,7 +76,7 @@ void Control::adjust(int delta) {
     }
 }
 
-void Control::transmit() {
+void IrSend::transmit() {
     ir::PulseTrain train;
     lastOk_ = ir::encode(protocol_, address_, command_, train, rc5Toggle_);
     if (!lastOk_) return;
@@ -88,7 +88,7 @@ void Control::transmit() {
     // Show the armed state before the emitter fires, not after. The frame takes
     // tens of milliseconds and the operator should see what is happening.
     ui::beginFrame();
-    ui::chrome("Control", "SENDING");
+    ui::chrome("Send", "SENDING");
     auto& d = ui::gfx();
     d.setFont(kFaceIdentity);
     d.setTextDatum(middle_center);
@@ -120,14 +120,14 @@ void Control::transmit() {
     app::recorder().noteFinding(detail);
 }
 
-void Control::draw() {
+void IrSend::draw() {
     ui::beginFrame();
     auto& d = ui::gfx();
 
     char right[16];
     std::snprintf(right, sizeof(right), "%lu sent",
                   static_cast<unsigned long>(sent_));
-    ui::chrome("Control", right);
+    ui::chrome("Send", right);
 
     d.setFont(kFaceData);
     int y = kBodyTop + 6;
@@ -174,7 +174,7 @@ void Control::draw() {
     ui::endFrame();
 }
 
-bool Control::handleKeys() {
+bool IrSend::handleKeys() {
     if (!M5Cardputer.Keyboard.isChange() || !M5Cardputer.Keyboard.isPressed())
         return true;
 
@@ -214,7 +214,7 @@ bool Control::handleKeys() {
     return true;
 }
 
-void Control::run() {
+void IrSend::run() {
     for (;;) {
         M5Cardputer.update();
         if (!handleKeys()) return;

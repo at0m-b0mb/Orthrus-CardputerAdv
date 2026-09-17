@@ -1,4 +1,4 @@
-#include "harvest.h"
+#include "wifi_handshakes.h"
 
 #include <M5Cardputer.h>
 #include <SD.h>
@@ -167,7 +167,7 @@ uint16_t qualityColour(d11::Quality q) {
 
 }  // namespace
 
-bool Harvest::begin() {
+bool WifiHandshakes::begin() {
     table_.clear();
     g_head = g_tail = 0;
     g_overruns = 0;
@@ -189,7 +189,7 @@ bool Harvest::begin() {
     return true;
 }
 
-void Harvest::hop() {
+void WifiHandshakes::hop() {
     if (locked_) return;
 
     const uint32_t dwell = isBusyChannel(channel_) ? kBusyDwellMs : kDwellMs;
@@ -200,7 +200,7 @@ void Harvest::hop() {
     esp_wifi_set_channel(channel_, WIFI_SECOND_CHAN_NONE);
 }
 
-void Harvest::handleBeacon(const uint8_t* frame, uint16_t len,
+void WifiHandshakes::handleBeacon(const uint8_t* frame, uint16_t len,
                            const d11::FrameInfo& fi, uint8_t channel, int8_t rssi) {
     d11::BeaconInfo b;
     if (!d11::parseBeacon(frame + fi.headerLen, len - fi.headerLen, b)) return;
@@ -224,7 +224,7 @@ void Harvest::handleBeacon(const uint8_t* frame, uint16_t len,
     if (pcapOpen_ && !beaconAlreadyWritten(bssid)) writePcapFrame(frame, len);
 }
 
-bool Harvest::beaconAlreadyWritten(const uint8_t bssid[d11::kMacLen]) {
+bool WifiHandshakes::beaconAlreadyWritten(const uint8_t bssid[d11::kMacLen]) {
     for (uint8_t i = 0; i < beaconWrittenCount_; i++)
         if (std::memcmp(beaconWritten_[i], bssid, d11::kMacLen) == 0) return true;
 
@@ -237,7 +237,7 @@ bool Harvest::beaconAlreadyWritten(const uint8_t bssid[d11::kMacLen]) {
     return false;
 }
 
-void Harvest::handleData(const uint8_t* frame, uint16_t len,
+void WifiHandshakes::handleData(const uint8_t* frame, uint16_t len,
                          const d11::FrameInfo& fi, uint8_t channel, int8_t rssi) {
     const uint8_t* payload = nullptr;
     size_t payloadLen = 0;
@@ -285,7 +285,7 @@ void Harvest::handleData(const uint8_t* frame, uint16_t len,
     }
 }
 
-void Harvest::drain() {
+void WifiHandshakes::drain() {
     // Bounded per call so a burst cannot starve the UI: the loop redraws at
     // about five frames a second and must keep doing so.
     for (int budget = 0; budget < 6; budget++) {
@@ -307,14 +307,14 @@ void Harvest::drain() {
     }
 }
 
-void Harvest::pump() {
+void WifiHandshakes::pump() {
     hop();
     drain();
 }
 
 // ---- files ------------------------------------------------------------------
 
-bool Harvest::openPcap() {
+bool WifiHandshakes::openPcap() {
     if (pcapOpen_) return true;
     if (pcapFailed_) return false;
 
@@ -358,7 +358,7 @@ bool Harvest::openPcap() {
     return true;
 }
 
-void Harvest::writePcapFrame(const uint8_t* frame, uint16_t len) {
+void WifiHandshakes::writePcapFrame(const uint8_t* frame, uint16_t len) {
     if (!openPcap()) return;
 
     // Timestamps come from millis(): this board has no real-time clock, so the
@@ -379,7 +379,7 @@ void Harvest::writePcapFrame(const uint8_t* frame, uint16_t len) {
     if ((pcapFrames_ % 4) == 0) pcap_.flush();
 }
 
-bool Harvest::saveHashes() {
+bool WifiHandshakes::saveHashes() {
     savedLines_ = 0;
     saveOk_     = false;
     if (!openPcap()) return false;   // also settles the file naming
@@ -417,14 +417,14 @@ bool Harvest::saveHashes() {
 
 // ---- screens ----------------------------------------------------------------
 
-void Harvest::drawList() {
+void WifiHandshakes::drawList() {
     ui::beginFrame();
     auto& d = ui::gfx();
 
     char right[24];
     std::snprintf(right, sizeof(right), "ch%u%s  %u", static_cast<unsigned>(channel_),
                   locked_ ? "*" : " ", static_cast<unsigned>(table_.count()));
-    ui::chrome("Harvest", right);
+    ui::chrome("Handshakes", right);
 
     if (table_.count() == 0) {
         d.setFont(kFaceData);
@@ -490,7 +490,7 @@ void Harvest::drawList() {
     ui::endFrame();
 }
 
-void Harvest::drawDetail() {
+void WifiHandshakes::drawDetail() {
     if (table_.count() == 0) {
         view_ = View::List;
         return;
@@ -564,7 +564,7 @@ void Harvest::drawDetail() {
     ui::endFrame();
 }
 
-void Harvest::drawSaved() {
+void WifiHandshakes::drawSaved() {
     ui::beginFrame();
     auto& d = ui::gfx();
     ui::chrome("Export");
@@ -602,7 +602,7 @@ void Harvest::drawSaved() {
     ui::endFrame();
 }
 
-bool Harvest::handleKeys() {
+bool WifiHandshakes::handleKeys() {
     if (!M5Cardputer.Keyboard.isChange() || !M5Cardputer.Keyboard.isPressed())
         return true;
 
@@ -659,7 +659,7 @@ bool Harvest::handleKeys() {
     return true;
 }
 
-void Harvest::run() {
+void WifiHandshakes::run() {
     lastDrawMs_ = 0;
 
     for (;;) {

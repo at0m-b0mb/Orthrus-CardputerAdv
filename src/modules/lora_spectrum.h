@@ -18,7 +18,7 @@
 
 namespace orthrus::modules {
 
-class Spectrum {
+class LoraSpectrum {
 public:
     // 116 bins at 2 px each fills the panel width with room for an axis.
     static constexpr int kBins = 116;

@@ -1,4 +1,4 @@
-#include "credentials.h"
+#include "nfc_read.h"
 
 #include <M5Cardputer.h>
 
@@ -39,13 +39,13 @@ void uidToHex(const cr::TagIdentity& t, char* out, size_t cap) {
 
 }  // namespace
 
-bool Credentials::begin() {
+bool NfcRead::begin() {
     // Port probing lives in the HAL now, because Keys needs the same reader on
     // the same port and two copies of that logic would eventually disagree.
     return hal::openSharedReader(&busName_);
 }
 
-int Credentials::findInRoll(const cr::TagIdentity& t) const {
+int NfcRead::findInRoll(const cr::TagIdentity& t) const {
     for (uint8_t i = 0; i < rollCount_; i++) {
         if (roll_[i].tag.uidLen == t.uidLen &&
             std::memcmp(roll_[i].tag.uid, t.uid, t.uidLen) == 0)
@@ -54,7 +54,7 @@ int Credentials::findInRoll(const cr::TagIdentity& t) const {
     return -1;
 }
 
-void Credentials::poll() {
+void NfcRead::poll() {
     if (millis() - lastPollMs_ < kPollMs) return;
     lastPollMs_ = millis();
 
@@ -105,7 +105,7 @@ void Credentials::poll() {
     reader_.halt();
 }
 
-void Credentials::runKeyProbe() {
+void NfcRead::runKeyProbe() {
     if (selected_ < 0 || selected_ >= static_cast<int>(rollCount_)) return;
     cr::TagIdentity& t = roll_[selected_].tag;
 
@@ -161,7 +161,7 @@ void Credentials::runKeyProbe() {
     view_ = View::Card;
 }
 
-void Credentials::logBadge(const cr::TagIdentity& t) {
+void NfcRead::logBadge(const cr::TagIdentity& t) {
     auto& r = app::recorder();
     if (!r.active()) return;
 
@@ -179,13 +179,13 @@ void Credentials::logBadge(const cr::TagIdentity& t) {
     r.noteDevice(detail);
 }
 
-void Credentials::drawWaiting() {
+void NfcRead::drawWaiting() {
     ui::beginFrame();
     auto& d = ui::gfx();
 
     char right[20];
     std::snprintf(right, sizeof(right), "%s v%02X", busName_, reader_.chipVersion());
-    ui::chrome("Credentials", right);
+    ui::chrome("Read Card", right);
 
     d.setFont(kFaceUi);
     d.setTextDatum(middle_center);
@@ -218,7 +218,7 @@ void Credentials::drawWaiting() {
     ui::endFrame();
 }
 
-void Credentials::drawCard() {
+void NfcRead::drawCard() {
     if (selected_ < 0 || selected_ >= static_cast<int>(rollCount_)) {
         view_ = View::Waiting;
         return;
@@ -279,7 +279,7 @@ void Credentials::drawCard() {
     ui::endFrame();
 }
 
-void Credentials::drawDossier() {
+void NfcRead::drawDossier() {
     if (selected_ < 0 || selected_ >= static_cast<int>(rollCount_)) {
         view_ = View::Waiting;
         return;
@@ -330,7 +330,7 @@ void Credentials::drawDossier() {
     ui::endFrame();
 }
 
-void Credentials::drawRoll() {
+void NfcRead::drawRoll() {
     ui::beginFrame();
     auto& d = ui::gfx();
 
@@ -381,7 +381,7 @@ void Credentials::drawRoll() {
     ui::endFrame();
 }
 
-bool Credentials::handleKeys() {
+bool NfcRead::handleKeys() {
     if (!M5Cardputer.Keyboard.isChange() || !M5Cardputer.Keyboard.isPressed())
         return true;
 
@@ -428,7 +428,7 @@ bool Credentials::handleKeys() {
     return true;
 }
 
-void Credentials::run() {
+void NfcRead::run() {
     for (;;) {
         M5Cardputer.update();
 

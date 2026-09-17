@@ -29,7 +29,7 @@
 
 namespace orthrus::modules {
 
-class Proximity {
+class BleDevices {
 public:
     bool begin();
     void run();

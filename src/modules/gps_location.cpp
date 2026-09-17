@@ -1,4 +1,4 @@
-#include "position.h"
+#include "gps_location.h"
 
 #include <M5Cardputer.h>
 
@@ -50,13 +50,13 @@ uint16_t geometryColour(geo::Geometry g) {
 
 }  // namespace
 
-bool Position::begin() {
+bool GpsLocation::begin() {
     gnss_.begin();
     enteredMs_ = millis();
     return true;
 }
 
-void Position::pump() {
+void GpsLocation::pump() {
     gnss_.pump();
 
     if (!tracking_) return;
@@ -75,7 +75,7 @@ void Position::pump() {
     if (app::recorder().note(evidence::RecordKind::Note, detail)) trackPoints_++;
 }
 
-bool Position::mark() {
+bool GpsLocation::mark() {
     markError_ = nullptr;
 
     if (!gnss_.alive()) {
@@ -123,7 +123,7 @@ bool Position::mark() {
 
 // ---- screens ----------------------------------------------------------------
 
-void Position::skyMeter(int x, int y, int w, uint32_t satellites) {
+void GpsLocation::skyMeter(int x, int y, int w, uint32_t satellites) {
     auto& d = ui::gfx();
     // Twelve cells. A consumer receiver tracking twelve satellites is doing as
     // well as it is going to, so twelve is full scale rather than an arbitrary
@@ -140,7 +140,7 @@ void Position::skyMeter(int x, int y, int w, uint32_t satellites) {
     }
 }
 
-void Position::drawLive() {
+void GpsLocation::drawLive() {
     ui::beginFrame();
     auto& d = ui::gfx();
 
@@ -152,7 +152,7 @@ void Position::drawLive() {
         std::snprintf(right, sizeof(right), "%u sat",
                       static_cast<unsigned>(gnss_.satellites()));
     }
-    ui::chrome("Position", right);
+    ui::chrome("Location", right);
 
     d.setFont(kFaceData);
     d.setTextDatum(top_left);
@@ -263,7 +263,7 @@ void Position::drawLive() {
     ui::endFrame();
 }
 
-void Position::drawWaypoints() {
+void GpsLocation::drawWaypoints() {
     ui::beginFrame();
     auto& d = ui::gfx();
 
@@ -339,7 +339,7 @@ void Position::drawWaypoints() {
     ui::endFrame();
 }
 
-void Position::drawMarked() {
+void GpsLocation::drawMarked() {
     ui::beginFrame();
     auto& d = ui::gfx();
     ui::chrome("Marked");
@@ -372,7 +372,7 @@ void Position::drawMarked() {
     ui::endFrame();
 }
 
-bool Position::handleKeys() {
+bool GpsLocation::handleKeys() {
     if (!M5Cardputer.Keyboard.isChange() || !M5Cardputer.Keyboard.isPressed())
         return true;
 
@@ -421,7 +421,7 @@ bool Position::handleKeys() {
     return true;
 }
 
-void Position::run() {
+void GpsLocation::run() {
     lastDrawMs_ = 0;
     enteredMs_  = millis();
 

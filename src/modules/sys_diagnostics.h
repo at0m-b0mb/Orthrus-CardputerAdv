@@ -18,7 +18,7 @@
 
 namespace orthrus::modules {
 
-class Instruments {
+class SysDiagnostics {
 public:
     bool begin();
     void run();

@@ -19,7 +19,7 @@
 
 namespace orthrus::modules {
 
-class Credentials {
+class NfcRead {
 public:
     bool begin();
     void run();

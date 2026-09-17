@@ -37,7 +37,7 @@
 
 namespace orthrus::modules {
 
-class Harvest {
+class WifiHandshakes {
 public:
     bool begin();
     void run();
