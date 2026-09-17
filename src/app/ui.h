@@ -5,6 +5,7 @@
 #include <cstdint>
 
 #include "credential/grade.h"
+#include "wifi/network.h"
 #include "lorawan/findings.h"
 #include "theme.h"
 
@@ -62,6 +63,8 @@ uint16_t gradeColour(lorawan::Grade g);
 // silently wrong the moment either gains a value.
 uint16_t severityColour(credential::Severity s);
 uint16_t gradeColour(credential::Grade g);
+uint16_t severityColour(wifi::Severity s);
+uint16_t gradeColour(wifi::Grade g);
 
 // Both take y as the row's CENTRE line, matching the datum used internally.
 void textAt(int x, int y, uint16_t colour, const char* fmt, ...);

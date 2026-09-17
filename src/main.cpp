@@ -13,6 +13,8 @@
 #include "modules/airspace.h"
 #include "modules/credentials.h"
 #include "modules/engagement.h"
+#include "modules/control.h"
+#include "modules/perimeter.h"
 #include "modules/instruments.h"
 
 using namespace orthrus::theme;
@@ -46,9 +48,9 @@ struct Surface {
 // is actually pointing the device at.
 const Surface kSurfaces[] = {
     {"Airspace",    "LoRa and LoRaWAN device census",  true},
-    {"Perimeter",   "Wi-Fi recon and captive portals", false},
+    {"Perimeter",   "Wi-Fi survey, graded and mapped",  true},
     {"Credentials", "13.56 MHz badge identify and grade", true},
-    {"Control",     "Infrared and USB payloads",       false},
+    {"Control",     "Infrared room control (onboard)",  true},
     {"Engagement",  "Evidence log, chain head, export", true},
     {"Instruments", "Live power, radio, GNSS and tilt", true},
 };
@@ -203,6 +205,13 @@ void openSurface(int index) {
         return;
     }
 
+    if (index == 3) {
+        static orthrus::modules::Control control;
+        control.begin();
+        control.run();
+        return;
+    }
+
     if (index == 4) {
         static orthrus::modules::Engagement engagement;
         engagement.begin();
@@ -214,6 +223,13 @@ void openSurface(int index) {
         static orthrus::modules::Instruments instruments;
         instruments.begin();
         instruments.run();
+        return;
+    }
+
+    if (index == 1) {
+        static orthrus::modules::Perimeter perimeter;
+        perimeter.begin();
+        perimeter.run();
         return;
     }
 

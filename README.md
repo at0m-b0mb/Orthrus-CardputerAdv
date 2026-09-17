@@ -4,8 +4,8 @@
 
 <p align="center">
   <a href="https://github.com/at0m-b0mb/Orthrus-CardputerAdv/actions/workflows/ci.yml"><img src="https://github.com/at0m-b0mb/Orthrus-CardputerAdv/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/host%20tests-107%20passing-6FA86B" alt="107 host tests">
-  <img src="https://img.shields.io/badge/on--device%20tests-37%20passing-6FA86B" alt="37 on-device tests">
+  <img src="https://img.shields.io/badge/host%20tests-167%20passing-6FA86B" alt="167 host tests">
+  <img src="https://img.shields.io/badge/on--device%20tests-44%20passing-6FA86B" alt="44 on-device tests">
   <img src="https://img.shields.io/badge/platform-Cardputer--Adv-B8893B" alt="Cardputer-Adv">
   <img src="https://img.shields.io/badge/licence-MIT-8A857C" alt="MIT">
 </p>
@@ -276,7 +276,7 @@ Anything that decides whether a finding is true lives in `lib/core`, builds on
 the host, and is covered by tests. The firmware is glue around it.
 
 ```bash
-pio test -e native            # 107 host tests, no board required
+pio test -e native            # 167 host tests, no board required
 pio run -e selftest -t upload # 35 checks on the real device
 ```
 
@@ -307,12 +307,14 @@ Sanitizer — 3,000,000 hostile frames, zero findings — and that runs in CI.
 ```
 lib/core/lorawan/    parser, census, grader, channel plans   <- host-tested
 lib/core/credential/ badge identification and grading         <- host-tested
+lib/core/wifi/       network identification and grading       <- host-tested
+lib/core/ir/         infrared protocol encoders               <- host-tested
 lib/core/crypto/     SHA-256, checked against the NIST vectors
 lib/core/evidence/   tamper-evident hash chain
 src/hal/             board pins, SX1262 receive path, WS1850S reader
 src/app/             design tokens and drawing
 src/modules/         Airspace, Spectrum and Credentials
-test/native/         107 tests, no hardware needed
+test/native/         167 tests, no hardware needed
 tools/               screendump, mockup renderer, brand generator
 ```
 
@@ -324,10 +326,10 @@ tools/               screendump, mockup renderer, brand generator
 | --- | --- |
 | **Airspace** — LoRa/LoRaWAN census and grading | Working |
 | **Spectrum** — live band sweep with max-hold | Working |
-| **Perimeter** — Wi-Fi recon and captive portals | Not built |
+| **Perimeter** — Wi-Fi survey, graded, geotagged | Working |
 | **Credentials** — 13.56 MHz badge identify and grade | Working |
-| **Control** — infrared and USB payloads | Not built |
-| **Engagement** — scope, evidence log, export | Engine built, not yet wired to the UI |
+| **Control** — infrared room control | Working (transmit; capture needs the IR unit) |
+| **Engagement** — evidence log, chain head, KML export | Working |
 
 Unbuilt surfaces say so on screen rather than presenting empty menus.
 

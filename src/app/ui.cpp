@@ -171,6 +171,29 @@ uint16_t gradeColour(credential::Grade g) {
     return kMuted;
 }
 
+uint16_t severityColour(wifi::Severity s) {
+    switch (s) {
+        case wifi::Severity::Critical: return kCritical;
+        case wifi::Severity::High:     return kHigh;
+        case wifi::Severity::Medium:   return kMedium;
+        case wifi::Severity::Low:      return kLow;
+        case wifi::Severity::Info:     return kInfo;
+    }
+    return kMuted;
+}
+
+uint16_t gradeColour(wifi::Grade g) {
+    switch (g) {
+        case wifi::Grade::APlus:
+        case wifi::Grade::A:     return kGood;
+        case wifi::Grade::B:     return kLow;
+        case wifi::Grade::C:     return kMedium;
+        case wifi::Grade::D:     return kHigh;
+        case wifi::Grade::F:     return kCritical;
+    }
+    return kMuted;
+}
+
 void textAt(int x, int y, uint16_t colour, const char* fmt, ...) {
     char buf[72];
     va_list ap;
