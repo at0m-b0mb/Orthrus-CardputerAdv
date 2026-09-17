@@ -64,6 +64,7 @@ private:
         bool     logged      = false;
     };
 
+    void keepScanning();
     void drain();
     int  find(const uint8_t addr[ble::kAddrLen]) const;
     void ingest(const uint8_t addr[ble::kAddrLen], bool randomAddress, int8_t rssi,
@@ -89,6 +90,8 @@ private:
     int  scroll_   = 0;
     View view_     = View::List;
 
+    uint32_t lastScanCheckMs_ = 0;
+    uint32_t scanRestarts_    = 0;
     uint32_t lastDrawMs_ = 0;
     uint32_t enteredMs_  = 0;
 };

@@ -65,7 +65,8 @@ private:
 
     // Execution results.
     uint16_t ranLines_ = 0;
-    uint32_t sentKeys_ = 0;
+    uint32_t sentKeys_    = 0;
+    uint32_t droppedKeys_ = 0;
     bool     aborted_  = false;
 
     View     view_       = View::List;

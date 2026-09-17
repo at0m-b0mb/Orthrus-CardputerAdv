@@ -68,6 +68,7 @@ private:
 
     void startScan();
     void stopScan();
+    void keepScanning();
     void drainScan();
     bool connectAndWalk();
     void readSelected();
@@ -101,6 +102,7 @@ private:
     uint32_t enteredMs_   = 0;
 
     View     view_       = View::Scanning;
+    uint32_t lastScanCheckMs_ = 0;
     uint32_t lastDrawMs_ = 0;
 };
 

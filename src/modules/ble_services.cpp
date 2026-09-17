@@ -163,6 +163,20 @@ void BleServices::stopScan() {
     }
 }
 
+void BleServices::keepScanning() {
+    // NimBLE finishes a scan cycle on its own, and when it does the callback
+    // simply stops arriving. Nothing errors and nothing logs: the list just
+    // stops growing, which on screen is indistinguishable from an empty room.
+    //
+    // Learned from GhostTag, where this keepalive is in the shipped firmware
+    // because it was needed on real hardware. The documentation does not
+    // mention it.
+    if (g_scan == nullptr) return;
+    if (millis() - lastScanCheckMs_ < 500) return;
+    lastScanCheckMs_ = millis();
+    if (!g_scan->isScanning()) g_scan->start(0, nullptr, false);
+}
+
 void BleServices::drainScan() {
     while (g_tail != g_head) {
         const Seen& s = g_ring[g_tail];
@@ -637,7 +651,10 @@ void BleServices::run() {
 
     for (;;) {
         M5Cardputer.update();
-        if (view_ == View::Scanning || view_ == View::Devices) drainScan();
+        if (view_ == View::Scanning || view_ == View::Devices) {
+            keepScanning();
+            drainScan();
+        }
 
         if (view_ == View::Scanning && deviceCount_ &&
             millis() - enteredMs_ > kScanMs)

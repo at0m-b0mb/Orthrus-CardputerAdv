@@ -182,6 +182,22 @@ bool addressIsStable(AddressKind k) {
 // ---- classification ----------------------------------------------------------
 
 Kind classify(const Advert& a) {
+    // A DELIBERATE DIFFERENCE FROM GhostTag, WHICH IS OTHERWISE THE ORACLE HERE
+    //
+    // Every constant below was checked against GhostTag's ESP32 companion,
+    // which is proven against real AirTags, Tiles and SmartTags: company 0x004C
+    // with subtype 0x12, service 0xFEED, service 0xFD5A. All agree.
+    //
+    // GhostTag additionally calls anything carrying Samsung's company id
+    // (0x0075) a SmartTag. That is right for an anti-stalking alarm, where a
+    // false positive costs a glance. It is wrong here, where isTracker() writes
+    // a finding into an evidence log -- every Samsung phone, watch and pair of
+    // earbuds advertises with that company id, and a report claiming a room
+    // full of trackers is a report nobody reads twice.
+    //
+    // So Samsung is recognised by its SERVICE UUID only. Do not "fix" this to
+    // match GhostTag.
+
     // Service UUIDs first: they are assigned to one owner and mean one thing.
     if (a.hasService(kServiceTile)) return Kind::TileTracker;
     if (a.hasService(kServiceSamsung)) return Kind::SamsungTag;

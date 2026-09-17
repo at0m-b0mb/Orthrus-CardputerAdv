@@ -180,12 +180,15 @@ void UsbBadUsb::execute() {
                 case dk::LineKind::String:
                 case dk::LineKind::StringLn:
                     sentKeys_ += hid_.type(p.text, p.textLen, kDefaultKeyDelayMs);
-                    if (p.kind == dk::LineKind::StringLn)
-                        hid_.chord(0, dk::kKeyEnter);
+                    if (p.kind == dk::LineKind::StringLn) {
+                        if (hid_.chord(0, dk::kKeyEnter)) sentKeys_++;
+                    }
                     break;
                 case dk::LineKind::Keys:
-                    hid_.chord(p.modifiers, p.keycode);
-                    sentKeys_++;
+                    // Counted only when the host actually took it. Incrementing
+                    // regardless is how a device ends up reporting "200 keys
+                    // sent" for a payload that typed nothing.
+                    if (hid_.chord(p.modifiers, p.keycode)) sentKeys_++;
                     break;
                 default:
                     break;  // comments, blanks and unknowns do nothing
@@ -200,12 +203,14 @@ void UsbBadUsb::execute() {
     // Never leave a modifier held on the host, whatever happened above.
     hid_.releaseAll();
 
+    droppedKeys_ = hid_.keysDropped();
+
     char detail[96];
     std::snprintf(detail, sizeof(detail),
-                  "hid=%.24s lines=%u keys=%lu ms=%lu %s", files_[selected_],
+                  "hid=%.24s lines=%u keys=%lu drop=%lu %s", files_[selected_],
                   static_cast<unsigned>(ranLines_),
                   static_cast<unsigned long>(sentKeys_),
-                  static_cast<unsigned long>(millis() - startedAt),
+                  static_cast<unsigned long>(droppedKeys_),
                   aborted_ ? "aborted" : "complete");
     app::recorder().noteFinding(detail);
 
@@ -335,15 +340,32 @@ void UsbBadUsb::drawDone() {
     ui::textAt(8, y, kMuted, "lines run");
     ui::textRight(bd::kScreenW - 8, y, kText, "%u", static_cast<unsigned>(ranLines_));
     y += 14;
-    ui::textAt(8, y, kMuted, "keys sent");
+    ui::textAt(8, y, kMuted, "keys taken");
     ui::textRight(bd::kScreenW - 8, y, kText, "%lu",
                   static_cast<unsigned long>(sentKeys_));
-    y += 18;
+    y += 14;
 
-    ui::textAt(8, y, aborted_ ? kHigh : kGood,
-               aborted_ ? "Stopped by keypress." : "Completed.");
-    y += 13;
-    ui::textAt(8, y, kFaint, "Written to the engagement log.");
+    // Shown whenever it is non-zero, because a payload that half-typed is the
+    // one thing an operator must not walk away believing worked.
+    if (droppedKeys_) {
+        ui::textAt(8, y, kCritical, "dropped");
+        ui::textRight(bd::kScreenW - 8, y, kCritical, "%lu",
+                      static_cast<unsigned long>(droppedKeys_));
+        y += 14;
+    } else {
+        y += 4;
+    }
+
+    if (droppedKeys_) {
+        ui::textAt(8, y, kCritical, "The host stopped taking keys.");
+        y += 13;
+        ui::textAt(8, y, kFaint, "Typed output is incomplete.");
+    } else {
+        ui::textAt(8, y, aborted_ ? kHigh : kGood,
+                   aborted_ ? "Stopped by keypress." : "Completed.");
+        y += 13;
+        ui::textAt(8, y, kFaint, "Written to the engagement log.");
+    }
 
     ui::footer("any key   back");
     ui::endFrame();
