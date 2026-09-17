@@ -4,8 +4,8 @@
 
 <p align="center">
   <a href="https://github.com/at0m-b0mb/Orthrus-CardputerAdv/actions/workflows/ci.yml"><img src="https://github.com/at0m-b0mb/Orthrus-CardputerAdv/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/host%20tests-81%20passing-6FA86B" alt="81 host tests">
-  <img src="https://img.shields.io/badge/on--device%20tests-35%20passing-6FA86B" alt="35 on-device tests">
+  <img src="https://img.shields.io/badge/host%20tests-107%20passing-6FA86B" alt="107 host tests">
+  <img src="https://img.shields.io/badge/on--device%20tests-37%20passing-6FA86B" alt="37 on-device tests">
   <img src="https://img.shields.io/badge/platform-Cardputer--Adv-B8893B" alt="Cardputer-Adv">
   <img src="https://img.shields.io/badge/licence-MIT-8A857C" alt="MIT">
 </p>
@@ -118,6 +118,54 @@ and listen at the same time and pretending otherwise would be dishonest.
 
 ---
 
+## Credentials
+
+Hold a badge to the reader and Orthrus tells you what it is, what it relies on
+for security, and how hard it would be to copy — all from anticollision alone,
+which is exactly what someone standing next to you in a lift gets.
+
+A real badge, read on hardware:
+
+```
+ATQA 0004  SAK 08  UID 0B701E59  (4-byte)
+family Mifare Classic 1K, cipher Crypto1 (broken)
+GRADE F (15/100)  [surface read only]
+   CRITICAL  Broken cipher (Crypto1)     97%
+   MEDIUM    4-byte UID                  90%
+   INFO      Reader policy not visible
+   INFO      No key probe attempted
+```
+
+### The ceiling that shapes this too
+
+**You can read a badge. You cannot see what the reader does with it** — and the
+overwhelming majority of access control installations compare the UID and
+nothing else. A UID is broadcast unauthenticated by every card ever made. Against
+a UID-only reader, the finest DESFire on the market is a number anyone can copy.
+
+So **no card can earn A+ from a read alone**, and the device says why. The grade
+describes the credential's potential; the control that actually matters is
+invisible from where we are standing.
+
+Grading is by how hard the credential is to copy. Crypto1 has been publicly
+broken since 2008, so a Classic cannot be graded sound however tidy it is. A card
+with nothing to authenticate against grades worse still, because it needs no
+attack at all. And a published key that actually opened a sector is the worst
+thing the tool can find, because we did it rather than inferred it.
+
+Two identification subtleties a naive SAK lookup gets wrong: a card setting both
+the ISO-DEP and Crypto1 bits is reported as **the weaker half**, because the
+Crypto1 sectors are what an attacker will go for; and a 4-byte UID beginning
+`0x08` is random-per-session by spec, so it is a privacy feature and is not
+scored as a cloneable identifier.
+
+The WS1850S driver is written out rather than pulled from an MFRC522 library:
+every byte it parses comes off a card an attacker may have built, so the length
+handling is the security-relevant part and it should not be buried in a
+dependency. It trusts the measured frame length over anything the card claims.
+
+---
+
 ## Evidence integrity
 
 A capture that ends as an editable CSV is an anecdote. Orthrus links every
@@ -167,9 +215,25 @@ never answers.
 The radio also needs **TCXO at 1.8 V on DIO3** and **DIO2 driving the RF
 switch** — neither is RadioLib's default.
 
-With the cap fitted, **Grove Port A is the only expansion left**. NFC (0x50) and
-RFID2 (0x28) are both I²C and can share it; the IR unit needs those same pins as
-GPIO, so it cannot be present at the same time.
+### Two Grove ports, not one
+
+An earlier version of this README claimed the board's Port A was the only
+expansion left with the cap fitted. That was wrong. **The LoRa cap carries its
+own Grove port**, so both readers can be connected at once — confirmed on
+hardware with both units plugged in:
+
+```
+portA(G1/G2)  0x50  NFC Universal (ST25R3916)
+cap  (G8/G9)  0x28  RFID2 (WS1850S)
+```
+
+| Port | Pins | Bus |
+| --- | --- | --- |
+| Board's Port A | G1 = SCL, G2 = SDA | `M5.Ex_I2C` |
+| Cap pass-through | G9 = SCL, G8 = SDA | `M5.In_I2C` — shared with the codec, IMU and keyboard |
+
+The IR unit needs Port A's pins as plain GPIO, so it cannot share *that* port
+with an I²C unit — but it can sit on Port A while a reader uses the cap's.
 
 ---
 
@@ -201,6 +265,7 @@ pio run -t upload
 | `s` | Step spreading factor |
 | `x` | Spectrum sweep |
 | `c` | Clear the capture (in Census) |
+| `r` | Badge roll (in Credentials) |
 | `m` | Clear max-hold (in Spectrum) |
 
 ---
@@ -211,7 +276,7 @@ Anything that decides whether a finding is true lives in `lib/core`, builds on
 the host, and is covered by tests. The firmware is glue around it.
 
 ```bash
-pio test -e native            # 81 host tests, no board required
+pio test -e native            # 107 host tests, no board required
 pio run -e selftest -t upload # 35 checks on the real device
 ```
 
@@ -241,12 +306,13 @@ Sanitizer — 3,000,000 hostile frames, zero findings — and that runs in CI.
 
 ```
 lib/core/lorawan/    parser, census, grader, channel plans   <- host-tested
+lib/core/credential/ badge identification and grading         <- host-tested
 lib/core/crypto/     SHA-256, checked against the NIST vectors
 lib/core/evidence/   tamper-evident hash chain
-src/hal/             board pins, SX1262 receive path
+src/hal/             board pins, SX1262 receive path, WS1850S reader
 src/app/             design tokens and drawing
-src/modules/         Airspace and Spectrum
-test/native/         81 tests, no hardware needed
+src/modules/         Airspace, Spectrum and Credentials
+test/native/         107 tests, no hardware needed
 tools/               screendump, mockup renderer, brand generator
 ```
 
@@ -259,7 +325,7 @@ tools/               screendump, mockup renderer, brand generator
 | **Airspace** — LoRa/LoRaWAN census and grading | Working |
 | **Spectrum** — live band sweep with max-hold | Working |
 | **Perimeter** — Wi-Fi recon and captive portals | Not built |
-| **Credentials** — NFC and 125 kHz badge work | Not built |
+| **Credentials** — 13.56 MHz badge identify and grade | Working |
 | **Control** — infrared and USB payloads | Not built |
 | **Engagement** — scope, evidence log, export | Engine built, not yet wired to the UI |
 
