@@ -57,6 +57,42 @@ uint32_t repeatGapUs(Protocol p);
 const char* protocolName(Protocol p);
 uint16_t    carrierFor(Protocol p);
 
+// ---- decoding ---------------------------------------------------------------
+//
+// The mirror of encode(), for a train captured off a real remote.
+//
+// This is NOT the same job as the encoder run backwards. An encoded frame has
+// exact timings; a captured one does not. A receiver module adds its own bias
+// -- typically stretching marks and shortening spaces by 50 to 100 us -- and
+// the remote's own crystal is a few percent out. A decoder that compares for
+// equality decodes nothing that was ever actually transmitted.
+//
+// So every comparison here is proportional, with a floor for the short
+// intervals where a fixed error dominates. See kTolerancePercent.
+
+inline constexpr uint8_t  kTolerancePercent = 30;
+inline constexpr uint16_t kToleranceFloorUs = 130;
+
+struct Decoded {
+    Protocol protocol = Protocol::Nec;
+    uint16_t address  = 0;
+    uint16_t command  = 0;
+    bool     toggle   = false;   // RC5 only
+
+    // A NEC "repeat" frame: header, short space, stop mark, and no data at all.
+    // It means the key is still held. Reporting it as a decode failure makes a
+    // held button look like a broken capture.
+    bool repeat = false;
+};
+
+// True when `actual` is within tolerance of `expected`.
+bool within(uint16_t actual, uint16_t expected);
+
+// Identifies a captured train. Returns false when it matches nothing, rather
+// than guessing at the closest fit -- a wrong protocol replays as a different
+// button, or as nothing.
+bool decode(const PulseTrain& t, Decoded& out);
+
 // Widest address and command each protocol can carry, for input validation.
 uint16_t maxAddress(Protocol p);
 uint16_t maxCommand(Protocol p);

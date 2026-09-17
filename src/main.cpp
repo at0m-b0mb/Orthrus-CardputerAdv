@@ -25,10 +25,12 @@
 #include "modules/ir_send.h"
 #include "modules/nfc_read.h"
 #include "modules/sys_evidence.h"
+#include "modules/sys_files.h"
 #include "modules/wifi_clients.h"
 #include "modules/wifi_deauth.h"
 #include "modules/wifi_handshakes.h"
 #include "modules/sys_diagnostics.h"
+#include "modules/rfid_clone.h"
 #include "modules/rfid_keys.h"
 #include "modules/usb_badusb.h"
 #include "modules/wifi_networks.h"
@@ -116,7 +118,7 @@ const ToolEntry kNfcTools[] = {
 
 const ToolEntry kRfidTools[] = {
     {Tool::RfidTestKeys, "Test Keys", "Try every published key on every sector", true},
-    {Tool::RfidClone,    "Clone",     "Copy a card onto a blank you own",        false},
+    {Tool::RfidClone,    "Clone",     "Copy a card onto a blank you own",        true},
 };
 
 const ToolEntry kInfraredTools[] = {
@@ -140,7 +142,7 @@ const ToolEntry kUsbTools[] = {
 const ToolEntry kSystemTools[] = {
     {Tool::SysEvidence,    "Evidence",    "Session log, chain digest, KML export", true},
     {Tool::SysDiagnostics, "Diagnostics", "Battery, radio, GPS and sensors, live", true},
-    {Tool::SysFiles,       "Files",       "Browse what is on the microSD card",    false},
+    {Tool::SysFiles,       "Files",       "Browse what is on the microSD card",    true},
 };
 
 #define CAT(arr) arr, static_cast<uint8_t>(sizeof(arr) / sizeof(arr[0]))
@@ -459,6 +461,18 @@ void openTool(const ToolEntry& entry) {
             return;
         }
 
+        case Tool::RfidClone: {
+            static orthrus::modules::RfidClone clone;
+            if (!clone.begin()) {
+                failure("Clone", "No reader found.",
+                        "Plug an RFID2 unit into either",
+                        "Grove port: board or LoRa cap.");
+                return;
+            }
+            clone.run();
+            return;
+        }
+
         case Tool::IrSend: {
             static orthrus::modules::IrSend control;
             control.begin();
@@ -484,6 +498,13 @@ void openTool(const ToolEntry& entry) {
             static orthrus::modules::UsbBadUsb payload;
             payload.begin();
             payload.run();
+            return;
+        }
+
+        case Tool::SysFiles: {
+            static orthrus::modules::SysFiles files;
+            files.begin();
+            files.run();
             return;
         }
 

@@ -53,7 +53,8 @@ constexpr uint8_t PICC_AUTH_KEY_B = 0x61;
 constexpr uint8_t PICC_SEL_CL1 = 0x93;
 constexpr uint8_t PICC_SEL_CL2 = 0x95;
 constexpr uint8_t PICC_SEL_CL3 = 0x97;
-constexpr uint8_t PICC_MF_READ = 0x30;
+constexpr uint8_t PICC_MF_READ  = 0x30;
+constexpr uint8_t PICC_MF_WRITE = 0xA0;
 
 // Cascade tag: when a UID is longer than 4 bytes, the first byte of a cascade
 // level is this marker rather than UID data.
@@ -548,6 +549,68 @@ ReaderStatus Rfid2::readBlock(uint8_t block, uint8_t out[16]) {
 void Rfid2::endSector() {
     stopCrypto1();
     halt();
+}
+
+// ---- writing -----------------------------------------------------------------
+
+bool Rfid2::magicUnlock() {
+    if (!present_) return false;
+
+    // The Gen1a backdoor: a 7-bit 0x40, then a full 0x43. A card that answers
+    // 0x0A to both allows block 0 to be written without authenticating. A
+    // normal card does not answer at all, which is exactly what makes this a
+    // safe way to tell a blank from a real badge before writing anything.
+    halt();
+    delay(5);
+
+    uint8_t rx[4] = {0};
+    uint8_t rxLen = sizeof(rx);
+    uint8_t cmd = 0x40;
+    // 7 bits, not 8. The short frame is the whole trick.
+    if (transceive(&cmd, 1, 7, rx, rxLen, nullptr) != ReaderStatus::Ok) return false;
+    if (rxLen < 1 || (rx[0] & 0x0F) != 0x0A) return false;
+
+    cmd   = 0x43;
+    rxLen = sizeof(rx);
+    if (transceive(&cmd, 1, 0, rx, rxLen, nullptr) != ReaderStatus::Ok) return false;
+    if (rxLen < 1 || (rx[0] & 0x0F) != 0x0A) return false;
+
+    return true;
+}
+
+ReaderStatus Rfid2::writeBlock(uint8_t block, const uint8_t data[16],
+                               bool allowManufacturerBlock) {
+    if (!present_) return ReaderStatus::NotPresent;
+    if (data == nullptr) return ReaderStatus::ProtocolError;
+
+    // Block 0 is read-only on a normal card, and a failed write there is how
+    // people brick badges. It takes a deliberate flag, set only when the card
+    // has already answered the magic backdoor.
+    if (block == 0 && !allowManufacturerBlock) return ReaderStatus::ProtocolError;
+
+    // MIFARE WRITE is two stages: the command and block number, then -- after
+    // the card has acknowledged -- the sixteen bytes.
+    uint8_t tx[4] = {PICC_MF_WRITE, block, 0, 0};
+    if (!calculateCrc(tx, 2, &tx[2])) return ReaderStatus::ProtocolError;
+
+    uint8_t rx[4] = {0};
+    uint8_t rxLen = sizeof(rx);
+    ReaderStatus st = transceive(tx, 4, 0, rx, rxLen, nullptr);
+    if (st != ReaderStatus::Ok) return st;
+    // The card answers with a 4 bit ACK. Anything else is a NAK, and continuing
+    // would push sixteen bytes at a card that already said no.
+    if (rxLen < 1 || (rx[0] & 0x0F) != 0x0A) return ReaderStatus::ProtocolError;
+
+    uint8_t payload[18];
+    std::memcpy(payload, data, 16);
+    if (!calculateCrc(payload, 16, &payload[16])) return ReaderStatus::ProtocolError;
+
+    rxLen = sizeof(rx);
+    st = transceive(payload, 18, 0, rx, rxLen, nullptr);
+    if (st != ReaderStatus::Ok) return st;
+    if (rxLen < 1 || (rx[0] & 0x0F) != 0x0A) return ReaderStatus::ProtocolError;
+
+    return ReaderStatus::Ok;
 }
 
 // ---- the shared reader -------------------------------------------------------

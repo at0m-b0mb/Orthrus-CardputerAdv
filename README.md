@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/at0m-b0mb/Orthrus-CardputerAdv/actions/workflows/ci.yml"><img src="https://github.com/at0m-b0mb/Orthrus-CardputerAdv/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/host%20tests-292%20passing-6FA86B" alt="292 host tests">
+  <img src="https://img.shields.io/badge/host%20tests-319%20passing-6FA86B" alt="319 host tests">
   <img src="https://img.shields.io/badge/on--device%20tests-52%20passing-6FA86B" alt="52 on-device tests">
   <img src="https://img.shields.io/badge/platform-Cardputer--Adv-B8893B" alt="Cardputer-Adv">
   <img src="https://img.shields.io/badge/licence-MIT-8A857C" alt="MIT">
@@ -106,7 +106,7 @@ plaintext would be a lie dressed as a finding.
 
 ---
 
-## Spectrum
+## Spectrum — LoRa band sweep
 
 Sweeping the band at ~1 second per pass, with max-hold so bursty transmitters
 are visible at all. It began life as the measurement that proved the radio
@@ -118,7 +118,7 @@ and listen at the same time and pretending otherwise would be dishonest.
 
 ---
 
-## Credentials
+## Read Card — 13.56 MHz badges
 
 Hold a badge to the reader and Orthrus tells you what it is, what it relies on
 for security, and how hard it would be to copy — all from anticollision alone,
@@ -166,7 +166,7 @@ dependency. It trusts the measured frame length over anything the card claims.
 
 ---
 
-## Harvest — WPA handshakes and PMKID
+## Handshakes — WPA capture
 
 Turns "the network uses WPA2" into a finding a client can act on: a captured
 handshake means the passphrase is subject to offline guessing, at the attacker's
@@ -213,7 +213,7 @@ which is what reading a handshake needs.
 
 ---
 
-## Proximity — Bluetooth
+## Devices — Bluetooth
 
 Every phone, earbud, watch and luggage tag in a room shouts a small unencrypted
 packet several times a second. Proximity sorts that into things that matter.
@@ -239,7 +239,7 @@ operator makes knowingly, never a default.
 
 ---
 
-## Keys — Mifare Classic sector sweep
+## Test Keys — Mifare Classic sector sweep
 
 Credentials answers "what is this badge and how exposed is it" from
 anticollision alone. Keys answers what a client asks next: open it. Every
@@ -262,7 +262,7 @@ device never recovered.
 
 ---
 
-## Position — GNSS
+## Location — GNSS
 
 Three states, kept visibly distinct because they need completely different
 responses and look identical on a lazy screen: **nothing** (no NMEA at all — a
@@ -284,7 +284,7 @@ sentences.
 
 ---
 
-## Payload (BadUSB)
+## BadUSB
 
 The ESP32-S3's native USB lets the Cardputer present itself as a keyboard and
 type a DuckyScript the operator wrote. It needs no extra hardware.
@@ -316,6 +316,104 @@ assumed: without the touch, flashing fails with *"No serial data received"*.
 The keymap is US layout and the code says so. A payload written for US typed
 against a UK or German layout produces mangled input, because the host decides
 what a keycode means.
+
+---
+
+## Deauth — testing 802.11w
+
+802.11 management frames are unauthenticated unless a network turns on Protected
+Management Frames (802.11w). Where it is off, anyone in range can forge a
+disconnect for any client, and the whole network is one cheap radio away from
+being unusable. Clients are routinely asked to have this tested, and testing it
+means sending the frame.
+
+So the product of this surface is **not** "we knocked people off". It answers a
+question, in three steps:
+
+1. **Read the beacon first.** The RSN capability bits say whether 802.11w is
+   off, optional or required — and on a network that requires it, the finding is
+   available *without a single frame being transmitted*.
+2. **If the operator runs the test anyway**, a bounded burst goes at **one**
+   network they picked by hand.
+3. **Then listen.** Clients reassociating is proof the forgery worked. Silence
+   is not proof it did not, and the screen says so.
+
+**One target, selected by hand.** There is deliberately no all-networks mode.
+That is not a test of anything — it is interference with neighbours who did not
+agree to it and whose equipment is in nobody's scope, and it produces no finding
+the targeted test does not already give. The burst is capped at twenty seconds
+and stops on its own; any key aborts it.
+
+> On the common argument that a board this small cannot really disrupt anything:
+> it is wrong. Deauthentication is cheap, and one ESP32 will hold a floor of
+> clients off a network indefinitely. The cap exists because the hardware is
+> capable, not because it is not.
+
+Finding the 802.11w bits needs a real parser: the capability field sits behind
+two variable-length cipher and authentication suite lists, so reading it at a
+fixed offset works on a typical access point and silently lies on anything
+unusual. That parser also yields the AKM suites, the pairwise ciphers and WPS —
+all of which beat the scan API's single "encryption type" number.
+
+---
+
+## Clients — who is actually here
+
+A network scan tells you which access points exist. It says nothing about
+whether anybody is using them. A phone that is *not* connected to anything is
+still not silent: it sends probe requests, and some of those name networks it
+has joined before — so a device walking past can announce where it has been.
+
+Entirely passive. Nothing is transmitted.
+
+Two honesty problems, handled rather than ignored:
+
+- **Randomised addresses.** Modern phones change their MAC, so counting
+  addresses badly overcounts people. Every row says whether its address is
+  burned-in or randomised.
+- **Named probes are rarer than they were.** Both Android and iOS now send
+  mostly broadcast probes naming nothing. A device probing for nothing is the
+  normal case, not a failed capture, and the screen says so rather than looking
+  broken.
+
+---
+
+## Clone — copy a badge onto a blank
+
+The most convincing demonstration in physical security. A client who has read
+that their badges are copyable has read a sentence; a client who watches their
+own door open for a card that was blank two minutes ago has understood the
+problem.
+
+How it stays honest:
+
+- **The original is never written to.** It is read and it leaves the reader
+  exactly as it arrived. The code that could write to it refuses block 0 unless
+  the card has already answered the magic backdoor — which a real badge does
+  not.
+- **The destination must prove it is a blank.** Gen1a magic cards answer an
+  undocumented backdoor; normal cards ignore it. That probe is harmless and
+  happens *before* anything is armed, so pointing this at somebody's real badge
+  by mistake fails safe.
+- **Read and write are separate steps** with the card physically swapped in
+  between. Not friction for its own sake — it is the difference between a clone
+  and an accident.
+
+Only sectors that open with a published key can be copied, so the screen reports
+exactly how much of the card came across rather than claiming a clone that is
+mostly zeroes.
+
+---
+
+## Files — what is on the card
+
+Every surface here writes something, and until now the only way to check any of
+it was to power down and find a card reader. That is a bad moment to discover an
+export never happened.
+
+**Read only, and that is a decision.** There is no delete. An engagement log
+that can be erased in the field is not evidence. Pull the card and use a
+computer; that leaves a trace this does not.
 
 ---
 
@@ -412,21 +510,24 @@ pio run -t upload
 | Key | Does |
 | --- | --- |
 | `;` `.` `,` `/` | Move — all four on the category grid, up/down in a list |
-| `enter` | Open |
+| `enter` | Open / continue |
 | `` ` `` | Back |
-| `h` | Toggle channel hopping (Airspace) |
-| `s` | Step spreading factor (Airspace) · save capture (Harvest) |
-| `x` | Spectrum sweep (Airspace) |
-| `c` | Clear the capture (Airspace) |
-| `r` | Badge roll (Credentials) · retry the card (Engagement) |
-| `m` | Clear max-hold (Spectrum) · mark a waypoint (Position) |
-| `l` | Lock to this target's channel (Harvest) |
-| `k` | Sweep every sector (Keys) |
-| `f` | Trackers only (Proximity) |
-| `a` | Active scan (Proximity) — transmits, see above |
-| `t` | Track log on/off (Position) |
-| `w` | Waypoint list (Position) |
-| `e` | Export KML (Engagement) |
+| `a` | Arm (Deauth, Clone, BadUSB) · active scan (Devices) |
+| `l` | Lock to this channel (Handshakes, Clients) |
+| `s` | Save the capture (Handshakes) · step spreading factor (LoRa) |
+| `k` | Sweep every sector (Test Keys) |
+| `f` | Filter — trackers only (Devices), named probes only (Clients) |
+| `m` | Mark a waypoint (Location) · clear max-hold (Spectrum) |
+| `t` | Track log on/off (Location) |
+| `w` | Waypoint list (Location) |
+| `r` | Badge roll (Read Card) · retry the card (Evidence) · re-read (Clone) |
+| `e` | Export KML (Evidence) |
+| `h` | Toggle channel hopping (LoRa) |
+| `x` | Spectrum sweep (LoRa) |
+| `c` | Clear the capture (LoRa) |
+
+Arming is always its own step, and backing out clears it. Anything that
+transmits, writes or types needs `a` first and `enter` second.
 
 ---
 
@@ -436,7 +537,7 @@ Anything that decides whether a finding is true lives in `lib/core`, builds on
 the host, and is covered by tests. The firmware is glue around it.
 
 ```bash
-pio test -e native            # 292 host tests, no board required
+pio test -e native            # 319 host tests, no board required
 pio run -e selftest -t upload # 35 checks on the real device
 ```
 
@@ -466,19 +567,19 @@ Sanitizer — 3,000,000 hostile frames, zero findings — and that runs in CI.
 
 ```
 lib/core/lorawan/    parser, census, grader, channel plans   <- host-tested
-lib/core/dot11/      802.11 frames, EAPOL, hashcat and pcap   <- host-tested
+lib/core/dot11/      802.11 frames, RSN, EAPOL, stations, pcap  <- host-tested
 lib/core/ble/        BLE advert parsing and classification    <- host-tested
 lib/core/credential/ badge identification and grading         <- host-tested
 lib/core/wifi/       network identification and grading       <- host-tested
 lib/core/geo/        position formatting and error estimates  <- host-tested
-lib/core/ir/         infrared protocol encoders               <- host-tested
+lib/core/ir/         infrared encoders AND a tolerant decoder <- host-tested
 lib/core/ducky/      HID keymap and DuckyScript parser        <- host-tested
 lib/core/crypto/     SHA-256, checked against the NIST vectors
 lib/core/evidence/   tamper-evident hash chain
 src/hal/             board pins, SX1262 receive path, WS1850S reader
 src/app/             design tokens, drawing, category glyphs
 src/modules/         one file per surface
-test/native/         292 tests, no hardware needed
+test/native/         319 tests, no hardware needed
 tools/               screendump, mockup renderer, brand generator
 ```
 
@@ -488,18 +589,27 @@ tools/               screendump, mockup renderer, brand generator
 
 | Category | Surface | State |
 | --- | --- | --- |
-| Wi-Fi | **Perimeter** — survey, graded, geotagged | Working |
-| Wi-Fi | **Harvest** — WPA handshake and PMKID capture | Working |
-| Bluetooth | **Proximity** — BLE device and tracker recon | Working |
-| NFC | **Credentials** — 13.56 MHz badge identify and grade | Working |
-| RFID | **Keys** — Mifare Classic sector key sweep | Working |
-| Infrared | **Control** — room control | Working (transmit; capture needs the IR unit) |
-| LoRa | **Airspace** — LoRa/LoRaWAN census and grading | Working |
-| LoRa | **Spectrum** — live band sweep with max-hold | Working |
-| GPS | **Position** — live fix, waypoints, track log | Working |
-| USB | **Payload** — keyboard scripts | Working, in the `cardputer-adv-hid` build |
-| System | **Engagement** — evidence log, chain head, KML export | Working |
-| System | **Instruments** — live power, radio, GNSS, tilt | Working |
+| Wi-Fi | **Networks** — find networks and grade them | Working |
+| Wi-Fi | **Handshakes** — capture WPA handshakes to crack later | Working |
+| Wi-Fi | **Clients** — see devices and the networks they seek | Working |
+| Wi-Fi | **Deauth** — test if clients can be forced off (802.11w) | Working |
+| Bluetooth | **Devices** — find BLE devices and hidden trackers | Working |
+| Bluetooth | **Services** — connect and list what a device exposes | Not built |
+| NFC | **Read Card** — identify a badge and grade its exposure | Working |
+| RFID | **Test Keys** — try every published key on every sector | Working |
+| RFID | **Clone** — copy a card onto a blank you own | Working |
+| Infrared | **Send** — send remote codes to a TV, projector or AC | Working |
+| Infrared | **Learn** — capture a real remote's code, then replay it | Decoder done, capture not built |
+| LoRa | **Devices** — find LoRaWAN devices and grade them | Working |
+| LoRa | **Spectrum** — see what is transmitting across the band | Working |
+| GPS | **Location** — live fix, waypoints and track log | Working |
+| USB | **BadUSB** — type a scripted payload into a computer | Working, in the `cardputer-adv-hid` build |
+| System | **Evidence** — session log, chain digest, KML export | Working |
+| System | **Diagnostics** — battery, radio, GPS and sensors, live | Working |
+| System | **Files** — browse what is on the microSD card | Working |
+
+Anything not built says so on its own screen rather than presenting an empty
+menu.
 
 The menu is two levels: nine category tiles that fit on one screen with no
 scrolling, then the tools inside one. The first thing an operator knows when

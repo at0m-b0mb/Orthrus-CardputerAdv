@@ -309,6 +309,171 @@ void test_repeat_gaps_present_for_every_protocol() {
     }
 }
 
+// ---- the shipped decoder, against jitter ------------------------------------
+//
+// The decoders above work on ideal timings and exist to prove the ENCODER. The
+// one in lib/core has a harder job: a train captured off a real remote is never
+// exact. The receiver module stretches marks and shortens spaces, and the
+// remote's own crystal is a few percent out.
+
+namespace {
+
+// Applies a proportional skew plus a fixed bias, the way a receiver does.
+PulseTrain skewTrain(const PulseTrain& in, int percent, int biasUs) {
+    PulseTrain out = in;
+    for (uint8_t i = 0; i < out.count; i++) {
+        long v = out.us[i];
+        v = v + (v * percent) / 100;
+        // Marks are the even indices; a receiver lengthens them and shortens
+        // the spaces by the same amount.
+        v += (i % 2 == 0) ? biasUs : -biasUs;
+        if (v < 1) v = 1;
+        out.us[i] = static_cast<uint16_t>(v);
+    }
+    return out;
+}
+
+}  // namespace
+
+void test_every_protocol_survives_encode_then_decode() {
+    struct Case { Protocol p; uint16_t addr; uint16_t cmd; };
+    const Case cases[] = {
+        {Protocol::Nec, 0x04, 0x08},
+        {Protocol::Nec, 0x00, 0xFF},
+        // 0x34 ^ 0x12 != 0xFF, so this one is unambiguously extended.
+        // See the test below for the case where it is not.
+        {Protocol::NecExtended, 0x1234, 0x12},
+        {Protocol::Sony12, 0x01, 0x15},
+        {Protocol::Sony20, 0x1A2B, 0x7F},
+        {Protocol::Rc5, 0x05, 0x35},
+    };
+
+    for (const auto& c : cases) {
+        PulseTrain t;
+        TEST_ASSERT_TRUE(encode(c.p, c.addr, c.cmd, t));
+
+        Decoded d;
+        TEST_ASSERT_TRUE(decode(t, d));
+        TEST_ASSERT_EQUAL(static_cast<int>(c.p), static_cast<int>(d.protocol));
+        TEST_ASSERT_EQUAL_UINT16(c.addr, d.address);
+        TEST_ASSERT_EQUAL_UINT16(c.cmd, d.command);
+        TEST_ASSERT_FALSE(d.repeat);
+    }
+}
+
+void test_decoding_survives_the_skew_a_real_receiver_adds() {
+    // A decoder that compares for equality decodes nothing that was ever
+    // actually transmitted.
+    const int skews[][2] = {{0, 100}, {0, -100}, {8, 60}, {-8, -60}, {15, 0}};
+
+    for (const auto& s : skews) {
+        PulseTrain t;
+        TEST_ASSERT_TRUE(encode(Protocol::Nec, 0x04, 0x08, t));
+        const PulseTrain dirty = skewTrain(t, s[0], s[1]);
+
+        Decoded d;
+        TEST_ASSERT_TRUE(decode(dirty, d));
+        TEST_ASSERT_EQUAL_UINT16(0x04, d.address);
+        TEST_ASSERT_EQUAL_UINT16(0x08, d.command);
+    }
+}
+
+void test_rc5_toggle_survives_the_round_trip() {
+    // The toggle separates a new press from a held key. Losing it in the
+    // decoder means a replayed frame the target ignores as a repeat.
+    for (bool toggle : {false, true}) {
+        PulseTrain t;
+        TEST_ASSERT_TRUE(encode(Protocol::Rc5, 0x05, 0x35, t, toggle));
+        Decoded d;
+        TEST_ASSERT_TRUE(decode(t, d));
+        TEST_ASSERT_EQUAL(toggle, d.toggle);
+        TEST_ASSERT_EQUAL_UINT16(0x35, d.command);
+        TEST_ASSERT_EQUAL_UINT16(0x05, d.address);
+    }
+}
+
+void test_a_nec_repeat_frame_is_reported_not_rejected() {
+    // Header, half-length space, stop mark. It means the key is still down, and
+    // calling it a failure makes a held button look like a broken capture.
+    PulseTrain t;
+    t.count = 3;
+    t.us[0] = 9000;
+    t.us[1] = 2250;
+    t.us[2] = 560;
+
+    Decoded d;
+    TEST_ASSERT_TRUE(decode(t, d));
+    TEST_ASSERT_TRUE(d.repeat);
+}
+
+void test_a_corrupt_nec_command_is_refused_not_stored() {
+    // The command byte carries its own complement. Storing a button whose check
+    // failed gives the operator a key that will never work.
+    PulseTrain t;
+    TEST_ASSERT_TRUE(encode(Protocol::Nec, 0x04, 0x08, t));
+    t.us[3 + 16 * 2] = 1690;   // flip one bit of the command
+
+    Decoded d;
+    TEST_ASSERT_FALSE(decode(t, d));
+}
+
+void test_noise_decodes_as_nothing() {
+    // Guessing at the closest fit replays as a different button, or as nothing.
+    PulseTrain t;
+    t.count = 20;
+    for (uint8_t i = 0; i < t.count; i++)
+        t.us[i] = static_cast<uint16_t>(300 + i * 37);
+
+    Decoded d;
+    TEST_ASSERT_FALSE(decode(t, d));
+
+    PulseTrain empty;
+    TEST_ASSERT_FALSE(decode(empty, d));
+}
+
+void test_an_extended_address_of_complements_is_indistinguishable() {
+    // A real protocol ambiguity, not a decoder weakness. Extended NEC differs
+    // from plain NEC only in that the second address byte is not the
+    // complement of the first -- so an extended address whose halves HAPPEN to
+    // be complements produces a frame that is byte-for-byte a plain NEC frame.
+    //
+    // 0x8877: 0x77 ^ 0x88 == 0xFF. No receiver in the world can tell these
+    // apart, so reporting the plain reading is correct rather than a guess, and
+    // it replays identically either way.
+    PulseTrain t;
+    TEST_ASSERT_TRUE(encode(Protocol::NecExtended, 0x8877, 0x12, t));
+
+    Decoded d;
+    TEST_ASSERT_TRUE(decode(t, d));
+    TEST_ASSERT_EQUAL(static_cast<int>(Protocol::Nec), static_cast<int>(d.protocol));
+    TEST_ASSERT_EQUAL_UINT16(0x77, d.address);
+    TEST_ASSERT_EQUAL_UINT16(0x12, d.command);
+
+    // And the proof that it really is the same frame: encoding the plain
+    // reading gives identical timings.
+    PulseTrain plain;
+    TEST_ASSERT_TRUE(encode(Protocol::Nec, 0x77, 0x12, plain));
+    TEST_ASSERT_EQUAL_UINT8(t.count, plain.count);
+    for (uint8_t i = 0; i < t.count; i++)
+        TEST_ASSERT_EQUAL_UINT16(plain.us[i], t.us[i]);
+}
+
+void test_nec_extended_is_told_apart_from_plain_nec() {
+    // They differ only in whether the address byte is followed by its
+    // complement. Mislabelling one replays with the wrong address.
+    PulseTrain plain, ext;
+    TEST_ASSERT_TRUE(encode(Protocol::Nec, 0x04, 0x08, plain));
+    TEST_ASSERT_TRUE(encode(Protocol::NecExtended, 0x1234, 0x08, ext));
+
+    Decoded a, b;
+    TEST_ASSERT_TRUE(decode(plain, a));
+    TEST_ASSERT_TRUE(decode(ext, b));
+    TEST_ASSERT_EQUAL(static_cast<int>(Protocol::Nec), static_cast<int>(a.protocol));
+    TEST_ASSERT_EQUAL(static_cast<int>(Protocol::NecExtended),
+                      static_cast<int>(b.protocol));
+    TEST_ASSERT_EQUAL_UINT16(0x1234, b.address);
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
 
@@ -334,6 +499,15 @@ int main(int, char**) {
 
     RUN_TEST(test_frame_duration_is_plausible);
     RUN_TEST(test_repeat_gaps_present_for_every_protocol);
+
+    RUN_TEST(test_every_protocol_survives_encode_then_decode);
+    RUN_TEST(test_decoding_survives_the_skew_a_real_receiver_adds);
+    RUN_TEST(test_rc5_toggle_survives_the_round_trip);
+    RUN_TEST(test_a_nec_repeat_frame_is_reported_not_rejected);
+    RUN_TEST(test_a_corrupt_nec_command_is_refused_not_stored);
+    RUN_TEST(test_noise_decodes_as_nothing);
+    RUN_TEST(test_an_extended_address_of_complements_is_indistinguishable);
+    RUN_TEST(test_nec_extended_is_told_apart_from_plain_nec);
 
     return UNITY_END();
 }

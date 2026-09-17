@@ -109,6 +109,30 @@ public:
     static uint8_t blocksInSector(uint8_t sector);
     static uint8_t firstBlockOfSector(uint8_t sector);
 
+    // ---- writing, and the one place this driver does it ---------------------
+    //
+    // Everything else in this file reads. These exist for one job: putting a
+    // copy of a card onto a BLANK the operator owns, so a badge can be tested
+    // without keeping the original. They are never pointed at somebody else's
+    // credential.
+
+    // Gen1a "magic" cards answer an undocumented backdoor that unlocks the
+    // manufacturer block without authenticating. Probing for it is harmless --
+    // a normal card simply does not reply -- so it doubles as the way to tell a
+    // blank apart from a real badge BEFORE anything is written.
+    //
+    // Leaves the card unlocked on success; endSector() puts it back.
+    bool magicUnlock();
+
+    // Writes one 16 byte block. Only meaningful after magicUnlock(), or between
+    // a successful openSector() and endSector().
+    //
+    // Refuses block 0 unless `allowManufacturerBlock` is set, because on a
+    // normal card block 0 is read-only and a failed write there is how people
+    // brick badges.
+    ReaderStatus writeBlock(uint8_t block, const uint8_t data[16],
+                            bool allowManufacturerBlock = false);
+
     // True if the card answered anticollision at least once during the last
     // probe. Without this, a card lifted off the reader mid-probe is
     // indistinguishable from a card that refused every key -- and reporting

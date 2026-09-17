@@ -191,4 +191,177 @@ bool encode(Protocol p, uint16_t address, uint16_t command, PulseTrain& out,
     return false;
 }
 
+// ---- decoding ----------------------------------------------------------------
+
+bool within(uint16_t actual, uint16_t expected) {
+    uint32_t slack = (static_cast<uint32_t>(expected) * kTolerancePercent) / 100;
+    if (slack < kToleranceFloorUs) slack = kToleranceFloorUs;
+    const uint32_t lo = expected > slack ? expected - slack : 0;
+    const uint32_t hi = static_cast<uint32_t>(expected) + slack;
+    return actual >= lo && actual <= hi;
+}
+
+namespace {
+
+// NEC and its extended form differ only in whether the address byte is followed
+// by its own complement. Both are decoded here and told apart at the end.
+bool decodeNecFamily(const PulseTrain& t, Decoded& out) {
+    if (t.count < 3) return false;
+    if (!within(t.us[0], kNecHeaderMark)) return false;
+
+    // A repeat frame is header, half-length space, stop mark. It carries no
+    // data and means the key is still down.
+    if (within(t.us[1], 2250) && t.count <= 4) {
+        out.protocol = Protocol::Nec;
+        out.repeat   = true;
+        return true;
+    }
+
+    if (!within(t.us[1], kNecHeaderSpace)) return false;
+    // Header (2) + 32 bits of mark/space (64) + stop mark (1).
+    if (t.count < 2 + 64) return false;
+
+    uint8_t bytes[4] = {0};
+    for (int bit = 0; bit < 32; bit++) {
+        const uint16_t mark  = t.us[2 + bit * 2];
+        const uint16_t space = t.us[3 + bit * 2];
+        if (!within(mark, kNecBitMark)) return false;
+
+        bool one;
+        if (within(space, kNecOneSpace))       one = true;
+        else if (within(space, kNecZeroSpace)) one = false;
+        else return false;
+
+        // Least significant bit first, within each byte in turn.
+        if (one) bytes[bit / 8] = static_cast<uint8_t>(bytes[bit / 8] | (1 << (bit % 8)));
+    }
+
+    out.command = bytes[2];
+    // The command byte always carries its own complement. If that does not
+    // check out the capture is corrupt, and saying so beats storing a button
+    // that will never work.
+    if (static_cast<uint8_t>(bytes[2] ^ bytes[3]) != 0xFF) return false;
+
+    if (static_cast<uint8_t>(bytes[0] ^ bytes[1]) == 0xFF) {
+        out.protocol = Protocol::Nec;
+        out.address  = bytes[0];
+    } else {
+        // No complement on the address: the two bytes ARE the address.
+        out.protocol = Protocol::NecExtended;
+        out.address  = static_cast<uint16_t>(bytes[0] | (bytes[1] << 8));
+    }
+    return true;
+}
+
+bool decodeSonyFamily(const PulseTrain& t, Decoded& out) {
+    if (t.count < 4) return false;
+    if (!within(t.us[0], kSonyHeaderMark)) return false;
+    if (!within(t.us[1], kSonySpace)) return false;
+
+    // SIRC frames are 12, 15 or 20 bits. The final space is often missing from
+    // a capture because the receiver stops at the last mark, so the count is
+    // allowed to be one short.
+    uint8_t bits = 0;
+    if (t.count >= 2 + 40 - 1)      bits = 20;
+    else if (t.count >= 2 + 24 - 1) bits = 12;
+    else return false;
+
+    uint32_t value = 0;
+    for (uint8_t i = 0; i < bits; i++) {
+        const size_t markAt = 2 + static_cast<size_t>(i) * 2;
+        if (markAt >= t.count) return false;
+        const uint16_t mark = t.us[markAt];
+
+        bool one;
+        if (within(mark, kSonyOneMark))       one = true;
+        else if (within(mark, kSonyZeroMark)) one = false;
+        else return false;
+        if (one) value |= (1u << i);
+
+        // The trailing space is checked when present and forgiven when the
+        // capture ended on the mark.
+        const size_t spaceAt = markAt + 1;
+        if (spaceAt < t.count && !within(t.us[spaceAt], kSonySpace)) return false;
+    }
+
+    out.command = static_cast<uint16_t>(value & 0x7F);
+    if (bits == 12) {
+        out.protocol = Protocol::Sony12;
+        out.address  = static_cast<uint16_t>((value >> 7) & 0x1F);
+    } else {
+        out.protocol = Protocol::Sony20;
+        out.address  = static_cast<uint16_t>((value >> 7) & 0x1FFF);
+    }
+    return true;
+}
+
+bool decodeRc5(const PulseTrain& t, Decoded& out) {
+    if (t.count < 10) return false;
+
+    // Expand the merged runs back into half-bit levels. The encoder merged
+    // equal neighbours to produce 1778 us intervals; this undoes exactly that.
+    bool level[32];
+    int n = 0;
+    bool mark = true;   // a train always begins with a mark
+    for (uint8_t i = 0; i < t.count; i++) {
+        int halves;
+        if (within(t.us[i], kRc5Half))          halves = 1;
+        else if (within(t.us[i], kRc5Half * 2)) halves = 2;
+        else return false;
+
+        for (int k = 0; k < halves; k++) {
+            if (n >= 32) return false;
+            level[n++] = mark;
+        }
+        mark = !mark;
+    }
+
+    // The first start bit is a one, encoded space-then-mark -- so its leading
+    // space is silence and never reaches us. Put it back.
+    bool halves[32];
+    int total = 0;
+    halves[total++] = false;
+    for (int i = 0; i < n && total < 32; i++) halves[total++] = level[i];
+
+    // 14 bits, two half-bits each.
+    if (total < 28) return false;
+
+    uint16_t bits = 0;
+    for (int i = 0; i < 14; i++) {
+        const bool first  = halves[i * 2];
+        const bool second = halves[i * 2 + 1];
+        if (first == second) return false;   // not Manchester at all
+        bits = static_cast<uint16_t>((bits << 1) | (second ? 1 : 0));
+    }
+
+    // Two start bits, then toggle, address, command.
+    if (((bits >> 13) & 1) != 1) return false;
+    out.protocol = Protocol::Rc5;
+    out.toggle   = ((bits >> 11) & 1) != 0;
+    out.address  = static_cast<uint16_t>((bits >> 6) & 0x1F);
+    out.command  = static_cast<uint16_t>(bits & 0x3F);
+    return true;
+}
+
+}  // namespace
+
+bool decode(const PulseTrain& t, Decoded& out) {
+    out = Decoded{};
+    if (t.count < 3) return false;
+
+    // Ordered by how distinctive the header is. NEC's 9 ms mark and Sony's
+    // 2.4 ms one cannot be mistaken for each other or for RC5, which has no
+    // header at all -- so RC5 is tried last, as the thing left over.
+    if (decodeNecFamily(t, out)) return true;
+
+    out = Decoded{};
+    if (decodeSonyFamily(t, out)) return true;
+
+    out = Decoded{};
+    if (decodeRc5(t, out)) return true;
+
+    out = Decoded{};
+    return false;
+}
+
 }  // namespace orthrus::ir

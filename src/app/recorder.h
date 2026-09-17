@@ -77,7 +77,10 @@ private:
     evidence::Chain chain_;
     bool        active_    = false;
     char        path_[40]  = {0};
-    char        seed_[48]  = {0};
+    // Holds "orthrus/<12 hex MAC>/<path>". Sized for the longest path_
+    // rather than the usual one: a truncated seed could be shared by two
+    // sessions, which is the one thing it exists to prevent.
+    char        seed_[72]  = {0};
     const char* lastError_ = "";
     uint32_t    failures_  = 0;
     bool        attempted_ = false;
