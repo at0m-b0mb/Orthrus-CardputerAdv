@@ -47,6 +47,8 @@ uint8_t popcount64(uint64_t v) {
 
 bool Airspace::begin() {
     if (!radio_.begin()) return false;
+    gnss_.begin();
+    for (uint8_t i = 0; i < kTraceLen; i++) rssiTrace_[i] = -120;
 
     // Re-entering the module must not reset the clock, or every return trip
     // would make a long capture look like it had only just started -- and
@@ -107,7 +109,27 @@ lw::CaptureContext Airspace::context() const {
     return c;
 }
 
+void Airspace::sampleRssi() {
+    if (millis() - lastRssiMs_ < 60) return;
+    lastRssiMs_ = millis();
+
+    // Instantaneous, taken while the modem is in receive. This is the number
+    // that proves to the operator that the radio is listening even when the
+    // band is silent.
+    const float v = radio_.instantRssi();
+    if (v == 0.0f) return;
+    rssiNow_ = v;
+
+    int8_t clamped = static_cast<int8_t>(v < -128 ? -128 : (v > -20 ? -20 : v));
+    rssiTrace_[rssiPos_] = clamped;
+    rssiPos_ = static_cast<uint8_t>((rssiPos_ + 1) % kTraceLen);
+    if (rssiPos_ == 0) traceFull_ = true;
+}
+
 void Airspace::pump() {
+    gnss_.pump();
+    sampleRssi();
+
     static uint8_t phy[kMaxPhyLen];
     lw::RxMeta meta;
 
@@ -157,51 +179,71 @@ void Airspace::drawLive() {
 
     d.setFont(kFaceData);
 
-    // Tuning, in the accent: it is the one thing that changes as you hop.
-    char tune[32];
-    std::snprintf(tune, sizeof(tune), "%.3f MHz   SF%u", p.uplinkHz[chIndex_] / 1e6,
-                  static_cast<unsigned>(p.sfMin + sfIndex_));
-    ui::textAt(6, kBodyTop + 5, kShine, "%s", tune);
+    // Tuning, in the accent: the one thing that changes as you hop.
+    ui::textAt(6, kBodyTop + 4, kShine, "%.3f MHz  SF%u",
+               p.uplinkHz[chIndex_] / 1e6,
+               static_cast<unsigned>(p.sfMin + sfIndex_));
 
-    // Counters. Devices and frames are what you came for; the error counts are
-    // what stop an empty list being mistaken for a quiet band.
-    ui::textAt(6, kBodyTop + 24, kMuted, "devices");
-    ui::textRight(96, kBodyTop + 24, kText, "%u", static_cast<unsigned>(census_.size()));
-
-    ui::textAt(6, kBodyTop + 37, kMuted, "frames");
-    ui::textRight(96, kBodyTop + 37, kText, "%u",
-                  static_cast<unsigned>(census_.framesObserved()));
-
-    ui::textAt(6, kBodyTop + 50, kMuted, "crc fail");
-    ui::textRight(96, kBodyTop + 50, kFaint, "%u",
-                  static_cast<unsigned>(radio_.stats().crcErrors));
-
-    ui::textAt(6, kBodyTop + 63, kMuted, "other rf");
-    ui::textRight(96, kBodyTop + 63, kFaint, "%u",
-                  static_cast<unsigned>(parseFailures_));
-
-    if (lastLine_[0] != '\0') {
-        ui::textAt(6, kBodyTop + 82, kBrass, "%s", lastLine_);
+    // A countdown to the next hop, so the dwell is visible rather than a
+    // mystery pause.
+    if (hopping_) {
+        const uint32_t elapsed = millis() - lastHopMs_;
+        const int barW = 56;
+        const int fill = hopDwellMs_ ? static_cast<int>((elapsed * barW) / hopDwellMs_) : 0;
+        d.drawRect(kGridX, kBodyTop, barW, 4, kRule);
+        if (fill > 0) d.fillRect(kGridX, kBodyTop, fill > barW ? barW : fill, 4, kBrass);
     }
 
-    // The coverage grid. Columns are the channels we actually sweep, which for
-    // US915 is a 16-channel window of a 64-channel band -- so the grid is
-    // labelled with both numbers and the percentage is computed against the
-    // real band, not the window. Lighting cell 0 while parked on channel 10,
-    // which the old fixed 8-column grid did, was simply a lie.
-    const uint8_t sweep = lw::sweepableChannels(region_);
-    const int gridBottom =
-        ui::coverageGrid(kGridX, kGridY, sweep, p.sfCount(), chIndex_, sfIndex_,
-                         bd::kScreenW - kGridX - 4);
+    // ---- the live floor trace: always moving, traffic or not ---------------
+    constexpr int kTraceX = 6, kTraceY = kBodyTop + 14, kTraceH = 20;
+    d.drawFastHLine(kTraceX, kTraceY + kTraceH, kTraceLen * 2, kRule);
 
-    ui::textAt(kGridX, gridBottom + 8, kText, "%u%% heard",
-               static_cast<unsigned>(ctx.coveragePercent()));
-    if (sweep < p.uplinkCount) {
-        ui::textAt(kGridX, gridBottom + 19, kFaint, "%u of %u ch",
-                   static_cast<unsigned>(sweep),
-                   static_cast<unsigned>(p.uplinkCount));
+    const int span = 100;  // -120 .. -20 dBm
+    const uint8_t count = traceFull_ ? kTraceLen : rssiPos_;
+    for (uint8_t i = 0; i < count; i++) {
+        const uint8_t idx = traceFull_
+            ? static_cast<uint8_t>((rssiPos_ + i) % kTraceLen)
+            : i;
+        int h = ((rssiTrace_[idx] + 120) * kTraceH) / span;
+        if (h < 1) h = 1;
+        if (h > kTraceH) h = kTraceH;
+        d.fillRect(kTraceX + i * 2, kTraceY + kTraceH - h, 2, h, kBrass);
+    }
+    ui::textRight(bd::kScreenW - 6, kTraceY + 8, kText, "%d dBm",
+                  static_cast<int>(rssiNow_));
+
+    // ---- counters ----------------------------------------------------------
+    ui::textAt(6, kBodyTop + 46, kMuted, "dev");
+    ui::textAt(34, kBodyTop + 46, kText, "%u", static_cast<unsigned>(census_.size()));
+    ui::textAt(62, kBodyTop + 46, kMuted, "frm");
+    ui::textAt(92, kBodyTop + 46, kText, "%u",
+               static_cast<unsigned>(census_.framesObserved()));
+    ui::textRight(bd::kScreenW - 6, kBodyTop + 46, kFaint, "%u%% band",
+                  static_cast<unsigned>(ctx.coveragePercent()));
+
+    ui::textAt(6, kBodyTop + 58, kMuted, "crc");
+    ui::textAt(34, kBodyTop + 58, kFaint, "%u",
+               static_cast<unsigned>(radio_.stats().crcErrors));
+    ui::textAt(62, kBodyTop + 58, kMuted, "oth");
+    ui::textAt(92, kBodyTop + 58, kFaint, "%u",
+               static_cast<unsigned>(parseFailures_));
+
+    // ---- GPS: real data, arriving once a second, fix or no fix -------------
+    if (!gnss_.alive()) {
+        ui::textAt(6, kBodyTop + 72, kFaint, "GPS  no data");
+    } else if (gnss_.hasFix()) {
+        ui::textAt(6, kBodyTop + 72, kGood, "GPS %.4f,%.4f",
+                   gnss_.latitude(), gnss_.longitude());
     } else {
-        ui::textAt(kGridX, gridBottom + 19, kFaint, "of band");
+        // Satellites-in-view climbs long before a fix lands, so this line moves
+        // even indoors -- which is the whole point.
+        ui::textAt(6, kBodyTop + 72, kBrass, "GPS searching  %lu sats  %lu msg",
+                   static_cast<unsigned long>(gnss_.satellites()),
+                   static_cast<unsigned long>(gnss_.sentences()));
+    }
+
+    if (lastLine_[0] != '\0') {
+        ui::textAt(6, kBodyTop + 84, kText, "%s", lastLine_);
     }
 
     ui::footer("enter list  h hop  s sf  x sweep  ` back");

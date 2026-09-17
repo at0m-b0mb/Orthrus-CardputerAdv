@@ -14,6 +14,7 @@
 
 #include <cstdint>
 
+#include "hal/gnss.h"
 #include "hal/lora_radio.h"
 #include "lorawan/census.h"
 #include "lorawan/findings.h"
@@ -45,6 +46,22 @@ private:
     uint8_t coveredChannels() const;
     uint8_t coveredSpreadingFactors() const;
 
+    // A live trace of the receiver's own noise floor.
+    //
+    // The first build showed only counters that move when a LoRaWAN frame
+    // arrives. With no gateway nearby every number stayed at zero and a
+    // perfectly working radio looked dead. This always moves, because the
+    // receiver always has a floor.
+    static constexpr uint8_t kTraceLen = 58;
+    int8_t   rssiTrace_[kTraceLen] = {0};
+    uint8_t  rssiPos_   = 0;
+    bool     traceFull_ = false;
+    uint32_t lastRssiMs_ = 0;
+    float    rssiNow_   = 0.0f;
+
+    void sampleRssi();
+
+    hal::Gnss         gnss_;
     hal::LoraRadio    radio_;
     Spectrum          spectrum_;
     lorawan::Census   census_;
@@ -55,7 +72,7 @@ private:
     uint8_t  sfIndex_    = 0;
     bool     hopping_    = true;
     uint32_t lastHopMs_  = 0;
-    uint32_t hopDwellMs_ = 4000;
+    uint32_t hopDwellMs_ = 2500;
 
     uint32_t startedMs_  = 0;
     uint32_t lastDrawMs_ = 0;
