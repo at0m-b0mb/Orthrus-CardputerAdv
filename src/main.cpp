@@ -11,6 +11,7 @@
 #include "app/ui.h"
 #include "hal/board.h"
 #include "modules/airspace.h"
+#include "modules/credentials.h"
 
 using namespace orthrus::theme;
 namespace bd = orthrus::board;
@@ -42,7 +43,7 @@ struct Surface {
 const Surface kSurfaces[] = {
     {"Airspace",    "LoRa and LoRaWAN device census",  true},
     {"Perimeter",   "Wi-Fi recon and captive portals", false},
-    {"Credentials", "NFC and 125 kHz badge work",      false},
+    {"Credentials", "13.56 MHz badge identify and grade", true},
     {"Control",     "Infrared and USB payloads",       false},
     {"Engagement",  "Scope, evidence log, export",     false},
 };
@@ -161,6 +162,25 @@ void radioFailed() {
     waitForKey();
 }
 
+void readerFailed() {
+    orthrus::ui::beginFrame();
+    auto& d = orthrus::ui::gfx();
+    orthrus::ui::chrome("Credentials");
+
+    d.setFont(kFaceData);
+    d.setTextDatum(top_left);
+    d.setTextColor(kCritical, kInk);
+    d.drawString("No reader found.", 8, kHeaderH + 16);
+    d.setTextColor(kMuted, kInk);
+    d.drawString("Plug an RFID2 unit into either", 8, kHeaderH + 34);
+    d.drawString("Grove port: the board's Port A,", 8, kHeaderH + 46);
+    d.drawString("or the LoRa cap's own port.", 8, kHeaderH + 58);
+
+    orthrus::ui::footer("any key   back");
+    orthrus::ui::endFrame();
+    waitForKey();
+}
+
 void openSurface(int index) {
     if (!kSurfaces[index].ready) {
         notReady(kSurfaces[index]);
@@ -175,6 +195,17 @@ void openSurface(int index) {
             return;
         }
         airspace.run();
+        return;
+    }
+
+    if (index == 2) {
+        static orthrus::modules::Credentials credentials;
+        if (!credentials.begin()) {
+            readerFailed();
+            return;
+        }
+        credentials.run();
+        return;
     }
 }
 

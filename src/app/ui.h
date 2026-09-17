@@ -4,6 +4,7 @@
 
 #include <cstdint>
 
+#include "credential/grade.h"
 #include "lorawan/findings.h"
 #include "theme.h"
 
@@ -55,6 +56,12 @@ int coverageGrid(int x, int y, uint8_t cols, uint8_t rows, int litCol, int litRo
 
 uint16_t severityColour(lorawan::Severity s);
 uint16_t gradeColour(lorawan::Grade g);
+
+// Separate overloads rather than casting between the two namespaces' enums.
+// They line up today by coincidence, not by contract, and a cast would go
+// silently wrong the moment either gains a value.
+uint16_t severityColour(credential::Severity s);
+uint16_t gradeColour(credential::Grade g);
 
 // Both take y as the row's CENTRE line, matching the datum used internally.
 void textAt(int x, int y, uint16_t colour, const char* fmt, ...);

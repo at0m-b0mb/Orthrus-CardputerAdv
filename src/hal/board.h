@@ -38,10 +38,21 @@ inline constexpr uint32_t kGpsBaud = 115200;  // measured: 32 NMEA sentences in 
 // ---- microSD ---------------------------------------------------------------
 inline constexpr int kSdCs = 12;
 
-// ---- Grove Port A ----------------------------------------------------------
-// The only external expansion left once the cap is fitted. The NFC Universal
-// Unit (0x50) and RFID2 (0x28) are both I2C and can share it; the IR unit needs
-// these same pins as plain GPIO, so it cannot be present at the same time.
+// ---- Grove ports -----------------------------------------------------------
+// There are TWO once the LoRa cap is fitted, which an earlier version of this
+// file got wrong:
+//
+//   Port A on the board itself  G1 = SCL, G2 = SDA   (M5.Ex_I2C)
+//   the cap's pass-through      G9 = SCL, G8 = SDA   (M5.In_I2C, shared with
+//                                                     the codec, IMU and
+//                                                     keyboard controller)
+//
+// Verified on hardware 2026-09-16 with both units fitted: the NFC Universal
+// answered at 0x50 on Port A and the RFID2 at 0x28 on the cap port, at the same
+// time. So both readers can be connected at once.
+//
+// The IR unit needs Port A's pins as plain GPIO, so it cannot coexist with an
+// I2C unit on THAT port -- but it can sit on Port A while a reader uses the cap.
 inline constexpr int kGroveSda = 2;
 inline constexpr int kGroveScl = 1;
 

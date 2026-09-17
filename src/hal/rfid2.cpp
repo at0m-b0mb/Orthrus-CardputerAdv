@@ -1,0 +1,375 @@
+#include "rfid2.h"
+
+#include <M5Cardputer.h>
+
+#include <cstring>
+
+#include "board.h"
+
+namespace orthrus::hal {
+
+using credential::kMaxAtsLen;
+using credential::kMaxUidLen;
+
+namespace {
+
+constexpr uint32_t kI2cFreq = 100000;
+
+// MFRC522 / WS1850S registers. Over I2C these are addressed directly, unlike
+// the SPI interface which shifts and flags them.
+constexpr uint8_t REG_COMMAND      = 0x01;
+constexpr uint8_t REG_COM_IRQ      = 0x04;
+constexpr uint8_t REG_ERROR        = 0x06;
+constexpr uint8_t REG_FIFO_DATA    = 0x09;
+constexpr uint8_t REG_FIFO_LEVEL   = 0x0A;
+constexpr uint8_t REG_CONTROL      = 0x0C;
+constexpr uint8_t REG_BIT_FRAMING  = 0x0D;
+constexpr uint8_t REG_COLL         = 0x0E;
+constexpr uint8_t REG_MODE         = 0x11;
+constexpr uint8_t REG_TX_CONTROL   = 0x14;
+constexpr uint8_t REG_TX_ASK       = 0x15;
+constexpr uint8_t REG_CRC_RESULT_H = 0x21;
+constexpr uint8_t REG_CRC_RESULT_L = 0x22;
+constexpr uint8_t REG_T_MODE       = 0x2A;
+constexpr uint8_t REG_T_PRESCALER  = 0x2B;
+constexpr uint8_t REG_T_RELOAD_H   = 0x2C;
+constexpr uint8_t REG_T_RELOAD_L   = 0x2D;
+constexpr uint8_t REG_VERSION      = 0x37;
+
+constexpr uint8_t CMD_IDLE       = 0x00;
+constexpr uint8_t CMD_CALC_CRC   = 0x03;
+constexpr uint8_t CMD_TRANSCEIVE = 0x0C;
+constexpr uint8_t CMD_SOFT_RESET = 0x0F;
+
+// PICC commands (ISO/IEC 14443-3).
+constexpr uint8_t PICC_REQA   = 0x26;
+constexpr uint8_t PICC_HLTA   = 0x50;
+constexpr uint8_t PICC_RATS   = 0xE0;
+constexpr uint8_t PICC_SEL_CL1 = 0x93;
+constexpr uint8_t PICC_SEL_CL2 = 0x95;
+constexpr uint8_t PICC_SEL_CL3 = 0x97;
+
+// Cascade tag: when a UID is longer than 4 bytes, the first byte of a cascade
+// level is this marker rather than UID data.
+constexpr uint8_t kCascadeTag = 0x88;
+
+constexpr uint8_t ERR_MASK_SERIOUS = 0x13;  // BufferOvfl | ParityErr | ProtocolErr
+
+}  // namespace
+
+const char* readerStatusName(ReaderStatus s) {
+    switch (s) {
+        case ReaderStatus::Ok:             return "ok";
+        case ReaderStatus::NoCard:         return "no card";
+        case ReaderStatus::Timeout:        return "timeout";
+        case ReaderStatus::CollisionError: return "collision";
+        case ReaderStatus::ChecksumError:  return "bad checksum";
+        case ReaderStatus::ProtocolError:  return "protocol error";
+        case ReaderStatus::NotPresent:     return "reader not present";
+    }
+    return "?";
+}
+
+// ---- register plumbing ------------------------------------------------------
+
+bool Rfid2::readReg(uint8_t reg, uint8_t& value) const {
+    if (!bus_) return false;
+    return bus_->readRegister(address_, reg, &value, 1, kI2cFreq);
+}
+
+bool Rfid2::readRegs(uint8_t reg, uint8_t* out, size_t len) const {
+    if (!bus_) return false;
+    return bus_->readRegister(address_, reg, out, len, kI2cFreq);
+}
+
+bool Rfid2::writeReg(uint8_t reg, uint8_t value) const {
+    if (!bus_) return false;
+    return bus_->writeRegister8(address_, reg, value, kI2cFreq);
+}
+
+bool Rfid2::setRegBits(uint8_t reg, uint8_t mask) const {
+    uint8_t v = 0;
+    if (!readReg(reg, v)) return false;
+    return writeReg(reg, static_cast<uint8_t>(v | mask));
+}
+
+bool Rfid2::clearRegBits(uint8_t reg, uint8_t mask) const {
+    uint8_t v = 0;
+    if (!readReg(reg, v)) return false;
+    return writeReg(reg, static_cast<uint8_t>(v & ~mask));
+}
+
+// ---- bring-up ---------------------------------------------------------------
+
+bool Rfid2::begin(m5::I2C_Class* bus, uint8_t i2cAddress) {
+    bus_       = bus;
+    address_   = i2cAddress;
+    present_   = false;
+    lastError_ = "";
+    if (bus_ == nullptr) {
+        lastError_ = "no bus given";
+        return false;
+    }
+
+    if (!writeReg(REG_COMMAND, CMD_SOFT_RESET)) {
+        lastError_ = "no reader on the bus";
+        return false;
+    }
+
+    // The reset takes a moment and the chip does not answer meaningfully until
+    // it finishes. Poll rather than guess at a delay.
+    for (int i = 0; i < 20; i++) {
+        delay(3);
+        uint8_t cmd = 0;
+        if (readReg(REG_COMMAND, cmd) && (cmd & (1 << 4)) == 0) break;
+    }
+
+    // Timer: prescaler 0xA9 with TAuto gives ~40 kHz, and a reload of 0x03E8
+    // makes each transceive time out after about 25 ms. Long enough for the
+    // slowest card, short enough that a missing card does not stall the UI.
+    writeReg(REG_T_MODE, 0x80);
+    writeReg(REG_T_PRESCALER, 0xA9);
+    writeReg(REG_T_RELOAD_H, 0x03);
+    writeReg(REG_T_RELOAD_L, 0xE8);
+
+    writeReg(REG_TX_ASK, 0x40);  // force 100% ASK
+    writeReg(REG_MODE, 0x3D);    // CRC preset 0x6363
+
+    if (!readReg(REG_VERSION, version_)) {
+        lastError_ = "cannot read version register";
+        return false;
+    }
+    // 0x00 and 0xFF both mean "nothing is really answering".
+    if (version_ == 0x00 || version_ == 0xFF) {
+        lastError_ = "reader did not identify itself";
+        return false;
+    }
+
+    antennaOn();
+    present_ = true;
+    return true;
+}
+
+void Rfid2::antennaOn() { setRegBits(REG_TX_CONTROL, 0x03); }
+void Rfid2::antennaOff() { clearRegBits(REG_TX_CONTROL, 0x03); }
+
+// ---- transceive -------------------------------------------------------------
+
+ReaderStatus Rfid2::transceive(const uint8_t* tx, uint8_t txLen, uint8_t txLastBits,
+                               uint8_t* rx, uint8_t& rxLen, uint8_t* rxLastBits,
+                               bool checkCrc) {
+    const uint8_t rxCapacity = rxLen;
+    rxLen = 0;
+
+    writeReg(REG_COMMAND, CMD_IDLE);
+    writeReg(REG_COM_IRQ, 0x7F);        // clear all interrupt flags
+    writeReg(REG_FIFO_LEVEL, 0x80);     // flush the FIFO
+
+    for (uint8_t i = 0; i < txLen; i++) writeReg(REG_FIFO_DATA, tx[i]);
+
+    writeReg(REG_BIT_FRAMING, static_cast<uint8_t>(txLastBits & 0x07));
+    writeReg(REG_COMMAND, CMD_TRANSCEIVE);
+    setRegBits(REG_BIT_FRAMING, 0x80);  // StartSend
+
+    // Wait for receive-complete, idle, or the chip's own timer. The hardware
+    // timer is the real timeout; the loop counter only stops us hanging if the
+    // reader stops answering the bus entirely.
+    uint8_t irq = 0;
+    bool done = false;
+    for (int i = 0; i < 400; i++) {
+        if (!readReg(REG_COM_IRQ, irq)) {
+            clearRegBits(REG_BIT_FRAMING, 0x80);
+            lastError_ = "bus went away mid-transceive";
+            return ReaderStatus::NotPresent;
+        }
+        if (irq & 0x30) { done = true; break; }   // RxIRq | IdleIRq
+        if (irq & 0x01) {                          // TimerIRq: no card answered
+            clearRegBits(REG_BIT_FRAMING, 0x80);
+            return ReaderStatus::NoCard;
+        }
+        delayMicroseconds(150);
+    }
+    clearRegBits(REG_BIT_FRAMING, 0x80);
+    if (!done) return ReaderStatus::Timeout;
+
+    uint8_t err = 0;
+    readReg(REG_ERROR, err);
+    if (err & ERR_MASK_SERIOUS) return ReaderStatus::ProtocolError;
+
+    uint8_t available = 0;
+    if (!readReg(REG_FIFO_LEVEL, available)) return ReaderStatus::NotPresent;
+
+    // A card controls this length. Refuse anything that will not fit rather
+    // than trusting it -- this is the bounds check that matters in this file.
+    if (available > rxCapacity) {
+        lastError_ = "card returned more than we asked for";
+        return ReaderStatus::ProtocolError;
+    }
+
+    if (available > 0 && !readRegs(REG_FIFO_DATA, rx, available))
+        return ReaderStatus::NotPresent;
+    rxLen = available;
+
+    uint8_t control = 0;
+    readReg(REG_CONTROL, control);
+    if (rxLastBits) *rxLastBits = static_cast<uint8_t>(control & 0x07);
+
+    if (err & 0x08) return ReaderStatus::CollisionError;
+
+    if (checkCrc) {
+        if (rxLen < 3) return ReaderStatus::ChecksumError;
+        uint8_t crc[2];
+        if (!calculateCrc(rx, static_cast<uint8_t>(rxLen - 2), crc))
+            return ReaderStatus::ProtocolError;
+        if (crc[0] != rx[rxLen - 2] || crc[1] != rx[rxLen - 1])
+            return ReaderStatus::ChecksumError;
+    }
+
+    return ReaderStatus::Ok;
+}
+
+bool Rfid2::calculateCrc(const uint8_t* data, uint8_t len, uint8_t out[2]) {
+    writeReg(REG_COMMAND, CMD_IDLE);
+    writeReg(REG_COM_IRQ, 0x04);     // clear CRCIRq
+    writeReg(REG_FIFO_LEVEL, 0x80);
+    for (uint8_t i = 0; i < len; i++) writeReg(REG_FIFO_DATA, data[i]);
+    writeReg(REG_COMMAND, CMD_CALC_CRC);
+
+    for (int i = 0; i < 200; i++) {
+        uint8_t irq = 0;
+        if (!readReg(0x05, irq)) return false;  // DivIrqReg
+        if (irq & 0x04) {
+            writeReg(REG_COMMAND, CMD_IDLE);
+            return readReg(REG_CRC_RESULT_L, out[0]) &&
+                   readReg(REG_CRC_RESULT_H, out[1]);
+        }
+        delayMicroseconds(100);
+    }
+    writeReg(REG_COMMAND, CMD_IDLE);
+    return false;
+}
+
+// ---- the ISO14443-A dance ---------------------------------------------------
+
+ReaderStatus Rfid2::requestA(uint16_t& atqa) {
+    writeReg(REG_COLL, 0x80);  // clear ValuesAfterColl
+
+    uint8_t cmd = PICC_REQA;
+    uint8_t rx[4] = {0};
+    uint8_t rxLen = sizeof(rx);
+
+    // REQA is a 7-bit frame, not 8. Getting this wrong means no card ever
+    // answers and the reader looks broken.
+    const ReaderStatus st = transceive(&cmd, 1, 7, rx, rxLen, nullptr);
+    if (st != ReaderStatus::Ok) return st;
+    if (rxLen != 2) return ReaderStatus::ProtocolError;
+
+    atqa = static_cast<uint16_t>(rx[0] | (rx[1] << 8));
+    return ReaderStatus::Ok;
+}
+
+ReaderStatus Rfid2::cascade(credential::TagIdentity& tag) {
+    static const uint8_t kSelCmd[3] = {PICC_SEL_CL1, PICC_SEL_CL2, PICC_SEL_CL3};
+
+    tag.uidLen = 0;
+
+    for (uint8_t level = 0; level < 3; level++) {
+        // Anticollision: SEL, NVB=0x20, and the card answers with 4 UID bytes
+        // plus a BCC.
+        uint8_t tx[2] = {kSelCmd[level], 0x20};
+        uint8_t rx[8] = {0};
+        uint8_t rxLen = sizeof(rx);
+
+        ReaderStatus st = transceive(tx, 2, 0, rx, rxLen, nullptr);
+        if (st != ReaderStatus::Ok) return st;
+        if (rxLen != 5) return ReaderStatus::ProtocolError;
+
+        // The card's own integrity check. If this fails we are reading noise,
+        // and reporting a UID from it would be worse than reporting nothing.
+        const uint8_t bcc = rx[0] ^ rx[1] ^ rx[2] ^ rx[3];
+        if (bcc != rx[4]) return ReaderStatus::ChecksumError;
+
+        // SELECT: SEL, NVB=0x70, the five bytes back, then CRC.
+        uint8_t sel[9] = {kSelCmd[level], 0x70, rx[0], rx[1], rx[2], rx[3], rx[4], 0, 0};
+        if (!calculateCrc(sel, 7, &sel[7])) return ReaderStatus::ProtocolError;
+
+        uint8_t sak[8] = {0};
+        uint8_t sakLen = sizeof(sak);
+        st = transceive(sel, 9, 0, sak, sakLen, nullptr, /*checkCrc=*/true);
+        if (st != ReaderStatus::Ok) return st;
+        if (sakLen != 3) return ReaderStatus::ProtocolError;
+
+        const bool more = (sak[0] & 0x04) != 0;
+
+        // On a cascading level the first byte is the cascade tag, not UID.
+        const uint8_t first = more ? 1 : 0;
+        const uint8_t take  = static_cast<uint8_t>(4 - first);
+        if (more && rx[0] != kCascadeTag) return ReaderStatus::ProtocolError;
+        if (tag.uidLen + take > kMaxUidLen) return ReaderStatus::ProtocolError;
+
+        std::memcpy(tag.uid + tag.uidLen, rx + first, take);
+        tag.uidLen = static_cast<uint8_t>(tag.uidLen + take);
+
+        if (!more) {
+            tag.sak = sak[0];
+            return ReaderStatus::Ok;
+        }
+    }
+    return ReaderStatus::ProtocolError;
+}
+
+ReaderStatus Rfid2::requestAts(credential::TagIdentity& tag) {
+    // RATS: E0 50 (FSDI=5 => 64 byte frames, CID 0), then CRC.
+    uint8_t tx[4] = {PICC_RATS, 0x50, 0, 0};
+    if (!calculateCrc(tx, 2, &tx[2])) return ReaderStatus::ProtocolError;
+
+    uint8_t rx[kMaxAtsLen + 4] = {0};
+    uint8_t rxLen = sizeof(rx);
+    const ReaderStatus st = transceive(tx, 4, 0, rx, rxLen, nullptr, /*checkCrc=*/true);
+    if (st != ReaderStatus::Ok) return st;
+    if (rxLen < 3) return ReaderStatus::ProtocolError;
+
+    // rx[0] is TL, the length of the ATS including itself, and the last two
+    // bytes are CRC. Trust the frame length we measured over the card's claim.
+    uint8_t atsLen = static_cast<uint8_t>(rxLen - 2);
+    if (atsLen > kMaxAtsLen) atsLen = kMaxAtsLen;
+
+    std::memcpy(tag.ats, rx, atsLen);
+    tag.atsLen = atsLen;
+    return ReaderStatus::Ok;
+}
+
+ReaderStatus Rfid2::poll(credential::TagIdentity& tag) {
+    if (!present_) return ReaderStatus::NotPresent;
+
+    credential::TagIdentity found;
+
+    uint16_t atqa = 0;
+    ReaderStatus st = requestA(atqa);
+    if (st != ReaderStatus::Ok) return st;
+    found.atqa = atqa;
+
+    st = cascade(found);
+    if (st != ReaderStatus::Ok) return st;
+
+    // ISO-DEP cards can be asked for an ATS, which is what distinguishes a
+    // DESFire from an unidentifiable ISO-DEP card. A card refusing RATS is not
+    // an error -- it just means we learn less.
+    if (found.isIso14443_4()) requestAts(found);
+
+    tag = found;
+    return ReaderStatus::Ok;
+}
+
+void Rfid2::halt() {
+    uint8_t tx[4] = {PICC_HLTA, 0x00, 0, 0};
+    if (!calculateCrc(tx, 2, &tx[2])) return;
+
+    // A card that accepts HLTA answers with nothing at all, so a timeout here
+    // is success and anything else is not worth reporting.
+    uint8_t rx[4];
+    uint8_t rxLen = sizeof(rx);
+    transceive(tx, 4, 0, rx, rxLen, nullptr);
+}
+
+}  // namespace orthrus::hal

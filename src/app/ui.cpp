@@ -148,6 +148,29 @@ uint16_t gradeColour(lorawan::Grade g) {
     return kMuted;
 }
 
+uint16_t severityColour(credential::Severity s) {
+    switch (s) {
+        case credential::Severity::Critical: return kCritical;
+        case credential::Severity::High:     return kHigh;
+        case credential::Severity::Medium:   return kMedium;
+        case credential::Severity::Low:      return kLow;
+        case credential::Severity::Info:     return kInfo;
+    }
+    return kMuted;
+}
+
+uint16_t gradeColour(credential::Grade g) {
+    switch (g) {
+        case credential::Grade::APlus:
+        case credential::Grade::A:     return kGood;
+        case credential::Grade::B:     return kLow;
+        case credential::Grade::C:     return kMedium;
+        case credential::Grade::D:     return kHigh;
+        case credential::Grade::F:     return kCritical;
+    }
+    return kMuted;
+}
+
 void textAt(int x, int y, uint16_t colour, const char* fmt, ...) {
     char buf[72];
     va_list ap;

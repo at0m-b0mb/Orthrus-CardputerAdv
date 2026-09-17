@@ -26,6 +26,8 @@
 #include "lorawan/region.h"
 #include "hal/lora_radio.h"
 #include "modules/spectrum.h"
+#include "hal/rfid2.h"
+#include "credential/grade.h"
 
 namespace bd = orthrus::board;
 using namespace orthrus::lorawan;
@@ -400,21 +402,119 @@ void testGps() {
     check(sentences > 0, "GPS emits valid NMEA");
 }
 
-void testI2C() {
-    banner("i2c");
+void scanBus(m5::I2C_Class& bus, const char* label) {
     bool found[120] = {false};
-    M5.Ex_I2C.begin(I2C_NUM_0, bd::kGroveSda, bd::kGroveScl);
-    M5.Ex_I2C.scanID(found);
+    bus.scanID(found);
     int n = 0;
     for (uint8_t a = 0x08; a < 0x78; a++) {
         if (!found[a]) continue;
         n++;
         const char* name = (a == bd::kAddrNfcUniversal) ? "NFC Universal (ST25R3916)"
                          : (a == bd::kAddrRfid2)        ? "RFID2 (WS1850S)"
+                         : (a == 0x18)                  ? "ES8311 codec (internal)"
+                         : (a == 0x34)                  ? "TCA8418 keyboard (internal)"
+                         : (a == 0x69)                  ? "BMI270 IMU (internal)"
                                                         : "unknown";
-        Serial.printf("  [info] Grove 0x%02X  %s\n", a, name);
+        Serial.printf("  [info] %s 0x%02X  %s\n", label, a, name);
     }
-    if (n == 0) Serial.println("  [info] no units on Grove Port A");
+    if (n == 0) Serial.printf("  [info] %s: nothing responding\n", label);
+}
+
+void testI2C() {
+    banner("i2c: BOTH grove ports");
+    // The Cardputer-Adv's own Port A is G1/G2. The LoRa cap adds a SECOND Grove
+    // port on G8/G9, which is the internal bus -- so two units can be connected
+    // at once. The README claimed otherwise; this is the check that settles it.
+    M5.Ex_I2C.begin(I2C_NUM_0, bd::kGroveSda, bd::kGroveScl);
+    scanBus(M5.Ex_I2C, "portA(G1/G2)");
+    scanBus(M5.In_I2C, "cap  (G8/G9)");
+}
+
+// ---------------------------------------------------------------------------
+// 6. Credential reader, against a real badge.
+// ---------------------------------------------------------------------------
+
+void reportTag(const orthrus::credential::TagIdentity& t) {
+    using namespace orthrus::credential;
+
+    Serial.printf("  [info] ATQA %04X  SAK %02X  UID ", t.atqa, t.sak);
+    for (uint8_t i = 0; i < t.uidLen; i++) Serial.printf("%02X", t.uid[i]);
+    Serial.printf("  (%s)\n", uidKindName(t.uidKind()));
+
+    if (t.atsLen) {
+        Serial.printf("  [info] ATS ");
+        for (uint8_t i = 0; i < t.atsLen; i++) Serial.printf("%02X ", t.ats[i]);
+        Serial.println();
+    }
+
+    const Family fam = t.family();
+    Serial.printf("  [info] family %s, cipher %s\n", familyName(fam),
+                  cipherName(cipherFor(fam)));
+
+    const auto a = assess(t);
+    Serial.printf("  [info] GRADE %s (%u/100)%s\n", gradeName(a.grade), a.score,
+                  a.surfaceOnly ? "  [surface read only]" : "");
+    for (uint8_t i = 0; i < a.findings.count; i++) {
+        const orthrus::credential::Finding& f = a.findings.items[i];
+        if (findingCarriesConfidence(f.sev))
+            Serial.printf("         %-8s %-32s %u%%\n", severityName(f.sev),
+                          findingTitle(f.id), f.confidence);
+        else
+            Serial.printf("         %-8s %s\n", severityName(f.sev), findingTitle(f.id));
+    }
+}
+
+void testCredentialReader() {
+    banner("credential reader (RFID2 / WS1850S)");
+
+    static orthrus::hal::Rfid2 reader;
+    m5::I2C_Class* bus = nullptr;
+
+    if (reader.begin(&M5.Ex_I2C)) {
+        bus = &M5.Ex_I2C;
+        Serial.println("  [info] reader found on Port A (G1/G2)");
+    } else if (reader.begin(&M5.In_I2C)) {
+        bus = &M5.In_I2C;
+        Serial.println("  [info] reader found on the cap port (G8/G9)");
+    }
+
+    if (bus == nullptr) {
+        Serial.printf("  [info] no WS1850S on either bus (%s)\n", reader.lastError());
+        return;
+    }
+
+    check(reader.present(), "WS1850S initialised");
+    Serial.printf("  [info] chip version 0x%02X\n", reader.chipVersion());
+
+    Serial.println("  >>> PRESENT A CARD NOW (15 s) <<<");
+    M5Cardputer.Display.fillScreen(TFT_BLACK);
+    M5Cardputer.Display.setTextColor(TFT_YELLOW, TFT_BLACK);
+    M5Cardputer.Display.setCursor(6, 40);
+    M5Cardputer.Display.print("TAP A CARD NOW");
+
+    const uint32_t deadline = millis() + 15000;
+    bool got = false;
+    uint32_t attempts = 0;
+    while (millis() < deadline && !got) {
+        orthrus::credential::TagIdentity t;
+        const auto st = reader.poll(t);
+        attempts++;
+        if (st == orthrus::hal::ReaderStatus::Ok) {
+            got = true;
+            Serial.println();
+            reportTag(t);
+            reader.halt();
+        } else if (st != orthrus::hal::ReaderStatus::NoCard) {
+            Serial.printf("  [info] poll: %s\n", orthrus::hal::readerStatusName(st));
+        }
+        delay(80);
+    }
+
+    Serial.printf("  [info] %lu poll attempts\n", (unsigned long)attempts);
+    if (got) check(true, "read a real card end to end");
+    else     Serial.println("  [info] no card presented (not a failure)");
+
+    reader.antennaOff();
 }
 
 void testPower() {
@@ -467,6 +567,7 @@ void setup() {
     testHeapSoak();
     testGps();
     testI2C();
+    testCredentialReader();
 
     Serial.println();
     Serial.printf("######## RESULT: %d passed, %d failed ########\n", g_pass, g_fail);
