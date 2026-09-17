@@ -232,10 +232,19 @@ void BleDevices::keepScanning() {
     if (millis() - lastScanCheckMs_ < 500) return;
     lastScanCheckMs_ = millis();
 
-    if (!g_scan->isScanning()) {
-        g_scan->start(0, nullptr, false);
-        scanRestarts_++;
-    }
+    if (g_scan->isScanning()) return;
+
+    // Re-assert the callback before restarting.
+    //
+    // stopScan() nulls it, and with a null callback AND setMaxResults(0) NimBLE
+    // creates a NimBLEAdvertisedDevice per advert and never erases it -- the
+    // erase happens right after onResult returns, and onResult is never
+    // called. On a board with no PSRAM that is a leak that ends the session.
+    // Reachable path: a failed connect drops to View::Failed, a keypress goes
+    // back to View::Devices, and this restarts a callback-less scan.
+    g_scan->setAdvertisedDeviceCallbacks(&g_callbacks, /*wantDuplicates=*/true);
+    g_scan->start(0, nullptr, false);
+    scanRestarts_++;
 }
 
 void BleDevices::drain() {

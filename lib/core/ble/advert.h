@@ -42,7 +42,11 @@ inline constexpr uint16_t kCompanySamsung   = 0x0075;
 inline constexpr uint16_t kCompanyGoogle    = 0x00E0;
 inline constexpr uint16_t kCompanyTile      = 0x0157;
 
-inline constexpr uint16_t kServiceTile      = 0xFEED;  // Tile, Inc.
+// Tile has shipped TWO service UUIDs. Knowing only the older one means a
+// modern Tile is filed as a generic device and never flagged as a tracker,
+// which is a false negative in the one place false negatives matter.
+inline constexpr uint16_t kServiceTile      = 0xFEED;  // Tile, Inc. (original)
+inline constexpr uint16_t kServiceTileNew   = 0xFEEC;  // Tile, Inc. (newer)
 inline constexpr uint16_t kServiceSamsung   = 0xFD5A;  // Samsung SmartThings/Tag
 inline constexpr uint16_t kServiceFastPair  = 0xFE2C;  // Google Fast Pair
 inline constexpr uint16_t kServiceEddystone = 0xFEAA;  // Google Eddystone

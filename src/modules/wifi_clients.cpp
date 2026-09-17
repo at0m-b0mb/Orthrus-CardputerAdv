@@ -118,6 +118,19 @@ bool WifiClients::begin() {
     WiFi.disconnect(false, false);
     delay(50);
 
+    // Two steps Arduino's WiFi.mode() does not do for us, and both matter for a
+    // sniffer:
+    //
+    //   esp_wifi_set_ps(WIFI_PS_NONE) -- the STA_START handler turns on
+    //   WIFI_PS_MIN_MODEM, so the radio periodically SLEEPS. A sleeping radio
+    //   misses frames, and it misses them silently: the capture just looks
+    //   thin. Nothing else in this firmware turns it back off.
+    //
+    //   esp_wifi_set_storage(WIFI_STORAGE_RAM) -- otherwise every mode change
+    //   is written to NVS, wearing flash for settings we never want persisted.
+    esp_wifi_set_storage(WIFI_STORAGE_RAM);
+    esp_wifi_set_ps(WIFI_PS_NONE);
+
     wifi_promiscuous_filter_t filter = {};
     filter.filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT | WIFI_PROMIS_FILTER_MASK_DATA;
     esp_wifi_set_promiscuous_filter(&filter);

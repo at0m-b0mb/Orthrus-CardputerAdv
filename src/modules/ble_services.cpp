@@ -140,12 +140,24 @@ bool BleServices::begin() {
 }
 
 void BleServices::startScan() {
+    // Stop first. ble_gap_disc() returns BLE_HS_EALREADY if a scan is already
+    // running: the scan is NOT re-armed, nothing is cleared, and the new
+    // parameters are silently discarded -- so the rescan key did nothing at all.
+    if (g_scan != nullptr && g_scan->isScanning()) {
+        g_scan->stop();
+        delay(20);
+    }
+
     g_head = g_tail = 0;
     deviceCount_ = 0;
     enteredMs_   = millis();
     view_        = View::Scanning;
 
-    g_scan->setAdvertisedDeviceCallbacks(&g_callbacks, /*wantDuplicates=*/false);
+    // wantDuplicates=true. Passing false sets the CONTROLLER's duplicate
+    // filter, which suppresses every repeat advert from a device already seen
+    // -- so RSSI freezes at its first value and a device that was briefly out
+    // of range never reappears. All three reference firmwares disable it.
+    g_scan->setAdvertisedDeviceCallbacks(&g_callbacks, /*wantDuplicates=*/true);
     // ACTIVE here, unlike the Devices surface. This screen exists to connect to
     // something, so the operator has already decided to talk to it -- and a
     // name makes choosing the right one possible.
@@ -174,7 +186,18 @@ void BleServices::keepScanning() {
     if (g_scan == nullptr) return;
     if (millis() - lastScanCheckMs_ < 500) return;
     lastScanCheckMs_ = millis();
-    if (!g_scan->isScanning()) g_scan->start(0, nullptr, false);
+    if (g_scan->isScanning()) return;
+
+    // Re-assert the callback before restarting.
+    //
+    // stopScan() nulls it, and with a null callback AND setMaxResults(0) NimBLE
+    // creates a NimBLEAdvertisedDevice per advert and never erases it -- the
+    // erase happens right after onResult returns, and onResult is never
+    // called. On a board with no PSRAM that is a leak that ends the session.
+    // Reachable path: a failed connect drops to View::Failed, a keypress goes
+    // back to View::Devices, and this restarts a callback-less scan.
+    g_scan->setAdvertisedDeviceCallbacks(&g_callbacks, /*wantDuplicates=*/true);
+    g_scan->start(0, nullptr, false);
 }
 
 void BleServices::drainScan() {

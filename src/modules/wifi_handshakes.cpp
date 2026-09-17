@@ -177,6 +177,19 @@ bool WifiHandshakes::begin() {
     WiFi.disconnect(false, false);
     delay(50);
 
+    // Two steps Arduino's WiFi.mode() does not do for us, and both matter for a
+    // sniffer:
+    //
+    //   esp_wifi_set_ps(WIFI_PS_NONE) -- the STA_START handler turns on
+    //   WIFI_PS_MIN_MODEM, so the radio periodically SLEEPS. A sleeping radio
+    //   misses frames, and it misses them silently: the capture just looks
+    //   thin. Nothing else in this firmware turns it back off.
+    //
+    //   esp_wifi_set_storage(WIFI_STORAGE_RAM) -- otherwise every mode change
+    //   is written to NVS, wearing flash for settings we never want persisted.
+    esp_wifi_set_storage(WIFI_STORAGE_RAM);
+    esp_wifi_set_ps(WIFI_PS_NONE);
+
     wifi_promiscuous_filter_t filter = {};
     filter.filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT | WIFI_PROMIS_FILTER_MASK_DATA;
     esp_wifi_set_promiscuous_filter(&filter);
@@ -201,7 +214,8 @@ void WifiHandshakes::hop() {
 }
 
 void WifiHandshakes::handleBeacon(const uint8_t* frame, uint16_t len,
-                           const d11::FrameInfo& fi, uint8_t channel, int8_t rssi) {
+                                  const d11::FrameInfo& fi, uint8_t channel,
+                                  int8_t rssi, uint16_t origLen) {
     d11::BeaconInfo b;
     if (!d11::parseBeacon(frame + fi.headerLen, len - fi.headerLen, b)) return;
 
@@ -221,7 +235,7 @@ void WifiHandshakes::handleBeacon(const uint8_t* frame, uint16_t len,
     // open -- which it is not until something worth capturing has arrived. That
     // ordering is deliberate: opening a pcap the moment the screen is entered
     // would litter the card with empty captures from anyone who just looked.
-    if (pcapOpen_ && !beaconAlreadyWritten(bssid)) writePcapFrame(frame, len);
+    if (pcapOpen_ && !beaconAlreadyWritten(bssid)) writePcapFrame(frame, len, origLen);
 }
 
 bool WifiHandshakes::beaconAlreadyWritten(const uint8_t bssid[d11::kMacLen]) {
@@ -238,7 +252,8 @@ bool WifiHandshakes::beaconAlreadyWritten(const uint8_t bssid[d11::kMacLen]) {
 }
 
 void WifiHandshakes::handleData(const uint8_t* frame, uint16_t len,
-                         const d11::FrameInfo& fi, uint8_t channel, int8_t rssi) {
+                                const d11::FrameInfo& fi, uint8_t channel,
+                                int8_t rssi, uint16_t origLen) {
     const uint8_t* payload = nullptr;
     size_t payloadLen = 0;
     if (!d11::eapolPayload(frame, len, fi, &payload, &payloadLen)) return;
@@ -267,7 +282,7 @@ void WifiHandshakes::handleData(const uint8_t* frame, uint16_t len,
         table_.ingest(bssid, sta, kf, payload, payloadLen, channel, rssi, millis());
     if (t == nullptr) return;
 
-    writePcapFrame(frame, len);
+    writePcapFrame(frame, len, origLen);
 
     // One evidence record per step UP in quality, not one per frame. A busy
     // network retransmits M3 half a dozen times and the log would say nothing
@@ -297,9 +312,9 @@ void WifiHandshakes::drain() {
         d11::FrameInfo fi;
         if (d11::parseHeader(s.data, s.len, fi)) {
             if (fi.type == d11::FrameType::Management) {
-                handleBeacon(s.data, s.len, fi, s.channel, s.rssi);
+                handleBeacon(s.data, s.len, fi, s.channel, s.rssi, s.origLen);
             } else if (fi.type == d11::FrameType::Data) {
-                handleData(s.data, s.len, fi, s.channel, s.rssi);
+                handleData(s.data, s.len, fi, s.channel, s.rssi, s.origLen);
             }
         }
 
@@ -358,7 +373,9 @@ bool WifiHandshakes::openPcap() {
     return true;
 }
 
-void WifiHandshakes::writePcapFrame(const uint8_t* frame, uint16_t len) {
+void WifiHandshakes::writePcapFrame(const uint8_t* frame, uint16_t len,
+                                    uint16_t origLen) {
+    if (origLen < len) origLen = len;
     if (!openPcap()) return;
 
     // Timestamps come from millis(): this board has no real-time clock, so the
@@ -368,8 +385,13 @@ void WifiHandshakes::writePcapFrame(const uint8_t* frame, uint16_t len) {
     // a fault.
     const uint32_t ms = millis();
     uint8_t rec[d11::kPcapRecordHeaderLen];
+    // caplen and origlen are DIFFERENT numbers when a frame was clipped into
+    // the ring slot. Passing len for both makes the file assert the frame
+    // really was that short -- and a modern beacon carrying HE and RSN
+    // elements exceeds the slot routinely, so Wireshark shows a malformed
+    // beacon and an analyst blames the access point rather than our capture.
     const size_t n = d11::writePcapRecordHeader(rec, sizeof(rec), ms / 1000,
-                                                (ms % 1000) * 1000, len, len);
+                                                (ms % 1000) * 1000, len, origLen);
     pcap_.write(rec, n);
     pcap_.write(frame, len);
     pcapFrames_++;

@@ -82,8 +82,14 @@ jobs:
         run: pip install --upgrade platformio
       - name: Build firmware
         run: pio run -e cardputer-adv
+      - name: Build BadUSB firmware
+        run: pio run -e cardputer-adv-hid
       - name: Build on-device self-test
         run: pio run -e selftest
+      # A --wrap that matches nothing links green and silently disables every
+      # raw transmit. This asserts our override is the symbol that linked.
+      - name: Raw transmit override really linked
+        run: ./tools/check_rawtx_override.sh
       - uses: actions/upload-artifact@v4
         with:
           name: orthrus-firmware

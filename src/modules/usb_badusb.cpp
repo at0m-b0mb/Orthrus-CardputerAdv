@@ -41,7 +41,21 @@ bool UsbBadUsb::begin() {
         return true;
     }
     hid_.begin();  // already up from setup(); this is a no-op
-    SD.begin(bd::kSdCs, hal::sharedSpi(), 20000000);
+
+    // Mount through the recorder rather than calling SD.begin() here.
+    //
+    // This used to be a bare SD.begin(kSdCs, sharedSpi(), 20000000) and it was
+    // the only SD call site in the firmware that skipped hal::beginSharedSpi().
+    // On a boot where no radio surface had been opened, the SPI bus had no pins
+    // assigned and no chip select deasserted, so the card never mounted and the
+    // payload list came up empty -- looking exactly like a card with no
+    // payloads on it. It also hardcoded 20 MHz, bypassing the 20/10/4 ladder
+    // that exists because this cap lengthens the traces.
+    //
+    // The recorder already does bus bring-up, the speed ladder and the card
+    // checks, and this surface writes to the evidence log anyway.
+    app::recorder().begin();
+
     scanFiles();
     return true;
 }

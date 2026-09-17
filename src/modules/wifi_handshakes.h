@@ -49,13 +49,16 @@ private:
     void drain();
     void hop();
 
+    // origLen is the length the frame had ON THE AIR, which differs from len
+    // whenever the frame was clipped into a ring slot. The pcap record needs
+    // both or it silently claims the clipped length was the real one.
     void handleBeacon(const uint8_t* frame, uint16_t len, const dot11::FrameInfo& fi,
-                      uint8_t channel, int8_t rssi);
+                      uint8_t channel, int8_t rssi, uint16_t origLen);
     void handleData(const uint8_t* frame, uint16_t len, const dot11::FrameInfo& fi,
-                    uint8_t channel, int8_t rssi);
+                    uint8_t channel, int8_t rssi, uint16_t origLen);
 
     bool openPcap();
-    void writePcapFrame(const uint8_t* frame, uint16_t len);
+    void writePcapFrame(const uint8_t* frame, uint16_t len, uint16_t origLen);
     bool saveHashes();
 
     // Whether this access point's beacon has already gone into the capture

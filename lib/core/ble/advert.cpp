@@ -199,7 +199,8 @@ Kind classify(const Advert& a) {
     // match GhostTag.
 
     // Service UUIDs first: they are assigned to one owner and mean one thing.
-    if (a.hasService(kServiceTile)) return Kind::TileTracker;
+    if (a.hasService(kServiceTile) || a.hasService(kServiceTileNew))
+        return Kind::TileTracker;
     if (a.hasService(kServiceSamsung)) return Kind::SamsungTag;
     if (a.hasService(kServiceEddystone)) return Kind::Eddystone;
     if (a.hasService(kServiceFastPair)) return Kind::FastPair;
