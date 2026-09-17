@@ -1,2 +1,3 @@
-cb4e17401cda71b5e16a309de1b2f861fa9d5519654490813fd53e343ae65a4e  orthrus-1.0.0-cardputer-adv.bin
-e146258acb2e54fa77a1f4469abadd9b24a8a4bd4b32397341ee62074477c087  orthrus-1.0.0-firmware-only.bin
+627064f0eb0bb2eb875f59353e94481e56a5d169e22581207aae258c9fbde2fc  orthrus-1.1.0-badusb-firmware-only.bin
+c0741aa369b697f0acdeb6a7e509c50b18644eb0d5ef2a19ffa0a5fdd6b82a70  orthrus-1.1.0-cardputer-adv.bin
+ef5bdd331d99630feac38bc609d5c32aaf725a2fe82393853e1f972cfd031a24  orthrus-1.1.0-firmware-only.bin
