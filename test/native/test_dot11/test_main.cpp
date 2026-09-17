@@ -10,6 +10,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <initializer_list>
 
 #include "dot11/capture.h"
 #include "dot11/eapol.h"
@@ -319,6 +320,162 @@ void test_vendor_wpa_element_is_recognised() {
     TEST_ASSERT_TRUE(parseBeacon(body, n, b));
     TEST_ASSERT_TRUE(b.hasWpa);
     TEST_ASSERT_FALSE(b.hasRsn);
+}
+
+
+// ---- RSN: the field that decides whether a deauth can work -------------------
+
+namespace {
+
+// Builds an RSN element body: version, group cipher, pairwise list, AKM list,
+// capabilities. The capabilities can only be found by walking the two
+// variable-length lists in front of them, which is the whole point.
+struct RsnBuilder {
+    uint8_t buf[64] = {0};
+    size_t  len     = 0;
+
+    RsnBuilder() { u16(1); suite(4); }          // version 1, group cipher CCMP
+
+    void u16(uint16_t v) {
+        buf[len++] = static_cast<uint8_t>(v & 0xFF);
+        buf[len++] = static_cast<uint8_t>(v >> 8);
+    }
+    void suite(uint8_t type) {
+        buf[len++] = 0x00; buf[len++] = 0x0F; buf[len++] = 0xAC; buf[len++] = type;
+    }
+    void pairwise(std::initializer_list<uint8_t> types) {
+        u16(static_cast<uint16_t>(types.size()));
+        for (uint8_t t : types) suite(t);
+    }
+    void akm(std::initializer_list<uint8_t> types) {
+        u16(static_cast<uint16_t>(types.size()));
+        for (uint8_t t : types) suite(t);
+    }
+    void caps(uint16_t v) { u16(v); }
+};
+
+}  // namespace
+
+void test_pmf_required_is_read_past_the_variable_length_suite_lists() {
+    // Reading the capabilities from a fixed offset gets the right answer on a
+    // typical access point and the wrong one on anything unusual. Two pairwise
+    // ciphers and three AKMs move the field by twenty bytes.
+    RsnBuilder b;
+    b.pairwise({4, 8});
+    b.akm({2, 6, 8});
+    b.caps(0x00C0);   // MFPC | MFPR
+
+    RsnInfo r;
+    TEST_ASSERT_TRUE(parseRsn(b.buf, b.len, r));
+    TEST_ASSERT_TRUE(r.present);
+    TEST_ASSERT_TRUE(r.pmfRequired);
+    TEST_ASSERT_TRUE(r.pmfCapable);
+    TEST_ASSERT_TRUE(r.akmSae);
+    TEST_ASSERT_TRUE(r.akmPsk);
+    TEST_ASSERT_TRUE(r.cipherCcmp);
+    TEST_ASSERT_TRUE(r.cipherGcmp);
+    TEST_ASSERT_FALSE(r.malformed);
+}
+
+void test_a_network_with_no_pmf_bits_reports_neither() {
+    RsnBuilder b;
+    b.pairwise({4});
+    b.akm({2});
+    b.caps(0x0000);
+
+    RsnInfo r;
+    TEST_ASSERT_TRUE(parseRsn(b.buf, b.len, r));
+    TEST_ASSERT_FALSE(r.pmfCapable);
+    TEST_ASSERT_FALSE(r.pmfRequired);
+}
+
+void test_pmf_required_implies_capable() {
+    // Some access points set only the required bit. Reporting such a network as
+    // "not capable" would be absurd.
+    RsnBuilder b;
+    b.pairwise({4});
+    b.akm({8});
+    b.caps(0x0040);   // MFPR only
+
+    RsnInfo r;
+    TEST_ASSERT_TRUE(parseRsn(b.buf, b.len, r));
+    TEST_ASSERT_TRUE(r.pmfRequired);
+    TEST_ASSERT_TRUE(r.pmfCapable);
+}
+
+void test_a_suite_count_running_past_the_end_reports_malformed_not_pmf() {
+    // A beacon built to confuse the parser must not end up claiming protection
+    // the network does not have, nor denying protection it does.
+    RsnBuilder b;
+    b.u16(40);        // claims forty pairwise ciphers
+    b.suite(4);
+
+    RsnInfo r;
+    TEST_ASSERT_TRUE(parseRsn(b.buf, b.len, r));
+    TEST_ASSERT_TRUE(r.malformed);
+    TEST_ASSERT_FALSE(r.pmfRequired);
+    TEST_ASSERT_FALSE(r.pmfCapable);
+}
+
+void test_a_truncated_rsn_element_stops_cleanly() {
+    RsnBuilder b;              // version and group cipher only
+    RsnInfo r;
+    TEST_ASSERT_TRUE(parseRsn(b.buf, b.len, r));
+    TEST_ASSERT_TRUE(r.present);
+    TEST_ASSERT_FALSE(r.pmfRequired);
+
+    RsnInfo tiny;
+    TEST_ASSERT_FALSE(parseRsn(b.buf, 1, tiny));
+    TEST_ASSERT_FALSE(parseRsn(nullptr, 40, tiny));
+}
+
+void test_vendor_suites_are_skipped_not_misread() {
+    // A selector with somebody else's OUI means something we do not know. Its
+    // type byte must not be read as though it were an IEEE one.
+    RsnBuilder b;
+    b.u16(1);
+    b.buf[b.len++] = 0x00; b.buf[b.len++] = 0x50;
+    b.buf[b.len++] = 0xF2; b.buf[b.len++] = 0x08;   // vendor OUI, type 8
+    b.akm({2});
+    b.caps(0x0080);
+
+    RsnInfo r;
+    TEST_ASSERT_TRUE(parseRsn(b.buf, b.len, r));
+    TEST_ASSERT_FALSE(r.cipherGcmp);   // type 8 under a vendor OUI is not GCMP
+    TEST_ASSERT_TRUE(r.pmfCapable);
+}
+
+void test_beacon_carries_the_rsn_details_through() {
+    RsnBuilder rsn;
+    rsn.pairwise({4});
+    rsn.akm({8});
+    rsn.caps(0x00C0);
+
+    uint8_t body[128] = {0};
+    size_t n = 12;
+    body[n++] = 0x00; body[n++] = 4;
+    std::memcpy(body + n, "corp", 4); n += 4;
+    body[n++] = 0x30; body[n++] = static_cast<uint8_t>(rsn.len);
+    std::memcpy(body + n, rsn.buf, rsn.len); n += rsn.len;
+
+    BeaconInfo b;
+    TEST_ASSERT_TRUE(parseBeacon(body, n, b));
+    TEST_ASSERT_TRUE(b.hasRsn);
+    TEST_ASSERT_TRUE(b.rsn.pmfRequired);
+    TEST_ASSERT_TRUE(b.rsn.akmSae);
+}
+
+void test_wps_is_told_apart_from_the_old_wpa_element() {
+    // Both are Microsoft OUI 00-50-F2 and differ only in the type byte.
+    uint8_t body[32] = {0};
+    size_t n = 12;
+    body[n++] = 0xDD; body[n++] = 4;
+    body[n++] = 0x00; body[n++] = 0x50; body[n++] = 0xF2; body[n++] = 0x04;
+
+    BeaconInfo b;
+    TEST_ASSERT_TRUE(parseBeacon(body, n, b));
+    TEST_ASSERT_TRUE(b.hasWps);
+    TEST_ASSERT_FALSE(b.hasWpa);
 }
 
 // ---- finding the EAPOL payload ---------------------------------------------
@@ -909,6 +1066,15 @@ int main() {
     RUN_TEST(test_element_running_past_the_end_is_flagged_not_read);
     RUN_TEST(test_oversized_ssid_is_clamped_to_32_bytes);
     RUN_TEST(test_vendor_wpa_element_is_recognised);
+
+    RUN_TEST(test_pmf_required_is_read_past_the_variable_length_suite_lists);
+    RUN_TEST(test_a_network_with_no_pmf_bits_reports_neither);
+    RUN_TEST(test_pmf_required_implies_capable);
+    RUN_TEST(test_a_suite_count_running_past_the_end_reports_malformed_not_pmf);
+    RUN_TEST(test_a_truncated_rsn_element_stops_cleanly);
+    RUN_TEST(test_vendor_suites_are_skipped_not_misread);
+    RUN_TEST(test_beacon_carries_the_rsn_details_through);
+    RUN_TEST(test_wps_is_told_apart_from_the_old_wpa_element);
 
     RUN_TEST(test_eapol_payload_found_over_llc_snap);
     RUN_TEST(test_protected_frame_is_never_treated_as_eapol);

@@ -23,6 +23,20 @@ constexpr uint8_t kElemDsSet  = 0x03;
 constexpr uint8_t kElemRsn    = 0x30;
 constexpr uint8_t kElemVendor = 0xDD;
 
+// RSN capability bits, 802.11-2020 table 9-192.
+constexpr uint16_t kRsnCapMfpr = 0x0040;  // management frame protection REQUIRED
+constexpr uint16_t kRsnCapMfpc = 0x0080;  // management frame protection CAPABLE
+
+uint16_t le16(const uint8_t* p) {
+    return static_cast<uint16_t>(p[0] | (static_cast<uint16_t>(p[1]) << 8));
+}
+
+// Every suite selector is a 3 byte OUI plus a 1 byte type. 00-0F-AC is the
+// IEEE's own; anything else is a vendor extension we do not claim to know.
+bool isIeeeSuite(const uint8_t* p) {
+    return p[0] == 0x00 && p[1] == 0x0F && p[2] == 0xAC;
+}
+
 constexpr char kHex[] = "0123456789abcdef";
 
 }  // namespace
@@ -87,6 +101,83 @@ bool resolveEndpoints(const FrameInfo& fi, uint8_t bssid[kMacLen],
     return true;
 }
 
+bool parseRsn(const uint8_t* data, size_t len, RsnInfo& out) {
+    out = RsnInfo{};
+
+    // Version (2) is the only mandatory field. Everything after it is optional
+    // and, critically, POSITIONAL: the capability bits can only be located by
+    // walking the two variable-length suite lists in front of them. A parser
+    // that reads the capabilities from a fixed offset gets the right answer on
+    // a typical access point and the wrong one on anything unusual -- and the
+    // wrong answer here means telling an operator a network is protected when
+    // it is not.
+    if (data == nullptr || len < 2) return false;
+    out.present = true;
+
+    size_t i = 2;  // past the version
+
+    if (i + 4 > len) return true;  // group cipher absent: legal, nothing more to read
+    i += 4;
+
+    if (i + 2 > len) return true;
+    const uint16_t pairwiseCount = le16(data + i);
+    i += 2;
+    // A count that runs past the end is either a malformed beacon or one built
+    // to confuse a parser. Either way the capabilities cannot be located, so
+    // nothing after this point is reported.
+    if (i + static_cast<size_t>(pairwiseCount) * 4 > len) {
+        out.malformed = true;
+        return true;
+    }
+    for (uint16_t k = 0; k < pairwiseCount; k++) {
+        const uint8_t* s = data + i + k * 4;
+        if (!isIeeeSuite(s)) continue;
+        switch (s[3]) {
+            case 2: out.cipherTkip = true; break;
+            case 4: out.cipherCcmp = true; break;
+            case 8:
+            case 9: out.cipherGcmp = true; break;
+            default: break;
+        }
+    }
+    i += static_cast<size_t>(pairwiseCount) * 4;
+
+    if (i + 2 > len) return true;
+    const uint16_t akmCount = le16(data + i);
+    i += 2;
+    if (i + static_cast<size_t>(akmCount) * 4 > len) {
+        out.malformed = true;
+        return true;
+    }
+    for (uint16_t k = 0; k < akmCount; k++) {
+        const uint8_t* s = data + i + k * 4;
+        if (!isIeeeSuite(s)) continue;
+        switch (s[3]) {
+            case 1:
+            case 3:
+            case 5:  out.akmEnterprise = true; break;
+            case 2:  out.akmPsk        = true; break;
+            case 6:  out.akmPskSha256  = true; break;
+            case 8:  out.akmSae        = true; break;
+            case 9:  out.akmFtSae      = true; break;
+            case 18: out.akmOwe        = true; break;
+            default: break;
+        }
+    }
+    i += static_cast<size_t>(akmCount) * 4;
+
+    // And finally the capabilities, which is what we came for.
+    if (i + 2 > len) return true;
+    const uint16_t caps = le16(data + i);
+    out.pmfRequired = (caps & kRsnCapMfpr) != 0;
+    out.pmfCapable  = (caps & kRsnCapMfpc) != 0;
+
+    // Required implies capable. Some access points set only the required bit;
+    // reporting such a network as "not capable" would be absurd.
+    if (out.pmfRequired) out.pmfCapable = true;
+    return true;
+}
+
 bool parseBeacon(const uint8_t* body, size_t len, BeaconInfo& out) {
     out = BeaconInfo{};
     if (body == nullptr || len < kBeaconFixedLen) return false;
@@ -127,12 +218,17 @@ bool parseBeacon(const uint8_t* body, size_t len, BeaconInfo& out) {
                 break;
             case kElemRsn:
                 out.hasRsn = true;
+                parseRsn(body + data, elen, out.rsn);
                 break;
             case kElemVendor:
-                // Microsoft OUI 00-50-F2 type 1 is the pre-RSN WPA element.
+                // Microsoft OUI 00-50-F2. Type 1 is the pre-RSN WPA element;
+                // type 4 is Wi-Fi Protected Setup, which is worth reporting in
+                // its own right -- WPS is how a network with a long passphrase
+                // gets opened anyway.
                 if (elen >= 4 && body[data] == 0x00 && body[data + 1] == 0x50 &&
-                    body[data + 2] == 0xF2 && body[data + 3] == 0x01) {
-                    out.hasWpa = true;
+                    body[data + 2] == 0xF2) {
+                    if (body[data + 3] == 0x01) out.hasWpa = true;
+                    if (body[data + 3] == 0x04) out.hasWps = true;
                 }
                 break;
             default:

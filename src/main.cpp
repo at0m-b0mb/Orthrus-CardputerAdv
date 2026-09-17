@@ -25,6 +25,8 @@
 #include "modules/ir_send.h"
 #include "modules/nfc_read.h"
 #include "modules/sys_evidence.h"
+#include "modules/wifi_clients.h"
+#include "modules/wifi_deauth.h"
 #include "modules/wifi_handshakes.h"
 #include "modules/sys_diagnostics.h"
 #include "modules/rfid_keys.h"
@@ -56,6 +58,7 @@ enum class Tool : uint8_t {
     WifiNetworks = 0,
     WifiHandshakes,
     WifiClients,
+    WifiDeauth,
     BleDevices,
     BleServices,
     NfcReadCard,
@@ -99,6 +102,7 @@ const ToolEntry kWifiTools[] = {
     {Tool::WifiNetworks,   "Networks",   "Find networks and grade them",        true},
     {Tool::WifiHandshakes, "Handshakes", "Capture WPA handshakes to crack later", true},
     {Tool::WifiClients,    "Clients",    "See devices and the networks they seek", true},
+    {Tool::WifiDeauth,     "Deauth",     "Test if clients can be forced off (802.11w)", true},
 };
 
 const ToolEntry kBluetoothTools[] = {
@@ -382,6 +386,26 @@ void openTool(const ToolEntry& entry) {
             static orthrus::modules::WifiNetworks perimeter;
             perimeter.begin();
             perimeter.run();
+            return;
+        }
+
+        case Tool::WifiClients: {
+            // Static: the station table is ~4 KB.
+            static orthrus::modules::WifiClients clients;
+            if (!clients.begin()) {
+                failure("Clients", "Monitor mode did not start.",
+                        "The Wi-Fi radio refused promiscuous",
+                        "mode. Power cycle and try again.");
+                return;
+            }
+            clients.run();
+            return;
+        }
+
+        case Tool::WifiDeauth: {
+            static orthrus::modules::WifiDeauth deauth;
+            deauth.begin();
+            deauth.run();
             return;
         }
 

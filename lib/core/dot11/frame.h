@@ -81,6 +81,41 @@ bool resolveEndpoints(const FrameInfo& fi, uint8_t bssid[kMacLen],
 
 // ---- beacons and probe responses -------------------------------------------
 
+// What the RSN information element says about a network.
+//
+// This is a much better source than the scan API's single "encryption type"
+// number: it carries the actual cipher and authentication suites, and the
+// capability bits that decide whether management frames can be forged.
+struct RsnInfo {
+    bool present = false;
+
+    // Protected Management Frames, 802.11w. THE field that decides whether a
+    // deauthentication can disconnect anyone on this network.
+    //
+    //   required -> management frames must be protected; forged deauths are
+    //               ignored, and a deauth test proves the protection works
+    //   capable  -> supported, negotiated per client; some clients protected,
+    //               others not
+    //   neither  -> every client can be disconnected by anyone in range
+    bool pmfCapable  = false;
+    bool pmfRequired = false;
+
+    // Authentication suites actually advertised.
+    bool akmPsk        = false;  // 00-0F-AC:2  pre-shared key
+    bool akmPskSha256  = false;  // 00-0F-AC:6
+    bool akmSae        = false;  // 00-0F-AC:8  WPA3 personal
+    bool akmFtSae      = false;  // 00-0F-AC:9
+    bool akmEnterprise = false;  // 00-0F-AC:1 / :5 / :3  802.1X
+    bool akmOwe        = false;  // 00-0F-AC:18 opportunistic wireless encryption
+
+    // Pairwise ciphers.
+    bool cipherTkip = false;  // 00-0F-AC:2  deprecated, broken
+    bool cipherCcmp = false;  // 00-0F-AC:4
+    bool cipherGcmp = false;  // 00-0F-AC:8 / :9
+
+    bool malformed = false;   // a length field inside the element did not add up
+};
+
 struct BeaconInfo {
     char     ssid[kSsidBuf] = {0};
     bool     ssidPresent    = false;  // the element existed
@@ -88,8 +123,15 @@ struct BeaconInfo {
     uint8_t  channel        = 0;      // from the DS Parameter Set, 0 if absent
     bool     hasRsn         = false;  // RSN information element (WPA2/WPA3)
     bool     hasWpa         = false;  // the older vendor-specific WPA element
+    bool     hasWps         = false;  // Wi-Fi Protected Setup is advertised
     bool     truncated      = false;  // an element ran past the end of the frame
+    RsnInfo  rsn;
 };
+
+// Parses the body of an RSN information element -- that is, the bytes AFTER
+// the element id and length. Exposed on its own because association frames
+// carry the same structure.
+bool parseRsn(const uint8_t* data, size_t len, RsnInfo& out);
 
 // Parses the tagged parameters of a beacon or probe response body. `body` must
 // point at the start of the fixed parameters (timestamp), i.e. frame +
