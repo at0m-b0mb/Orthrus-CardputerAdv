@@ -22,6 +22,7 @@
 #include "hal/board.h"
 #include "hal/hid.h"
 #include "modules/lora_devices.h"
+#include "modules/ir_learn.h"
 #include "modules/ir_send.h"
 #include "modules/nfc_read.h"
 #include "modules/sys_evidence.h"
@@ -123,7 +124,7 @@ const ToolEntry kRfidTools[] = {
 
 const ToolEntry kInfraredTools[] = {
     {Tool::IrSend,  "Send",  "Send remote codes to a TV, projector or AC", true},
-    {Tool::IrLearn, "Learn", "Capture a real remote's code, then replay it", false},
+    {Tool::IrLearn, "Learn", "Capture a real remote's code, then replay it", true},
 };
 
 const ToolEntry kLoraTools[] = {
@@ -370,6 +371,13 @@ void openTool(const ToolEntry& entry) {
     }
 
     switch (entry.tool) {
+        case Tool::IrLearn: {
+            static orthrus::modules::IrLearn learn;
+            learn.begin();
+            learn.run();
+            return;
+        }
+
         case Tool::LoraDevices: {
             // Static: the census table is ~13 KB and has no business on the
             // loop task's 8 KB stack.

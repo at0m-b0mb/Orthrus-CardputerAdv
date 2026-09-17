@@ -21,6 +21,7 @@ enum class Protocol : uint8_t {
     Nec = 0,       // 38 kHz, 32 bits, address + inverse, command + inverse
     NecExtended,   // 16-bit address, no inverse check on it
     Sony12,        // 40 kHz, 12 bits, 7 command + 5 address
+    Sony15,        // 40 kHz, 15 bits, 7 command + 8 address
     Sony20,        // 40 kHz, 20 bits
     Rc5,           // 36 kHz, Manchester, 14 bits with a toggle
 };

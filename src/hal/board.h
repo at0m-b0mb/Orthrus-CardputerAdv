@@ -59,6 +59,30 @@ inline constexpr int kGroveScl = 1;
 inline constexpr uint8_t kAddrNfcUniversal = 0x50;
 inline constexpr uint8_t kAddrRfid2        = 0x28;
 
+// ---- Unit IR (SKU U002) on the Grove port ----------------------------------
+//
+// Established 2026-09-17 from M5Stack's own documentation, schematic and
+// shipped example, five sources agreeing:
+//
+//   yellow wire = IR_TX  -> G2   active HIGH, drives an SS8050 into the LED
+//   white wire  = IR_RX  -> G1   IRM-3638T demodulated output
+//
+// The receiver IDLES HIGH and pulls LOW while it hears 38 kHz carrier -- M5's
+// own example says so in a comment on the pin read ("0: detected"). So a
+// falling edge starts a mark, and the decode logic is inverted with respect to
+// the transmitted waveform. IrRx discovers this by sampling the idle level
+// rather than trusting it, but this is the expected answer.
+//
+// ONE HARDWARE CAUTION, NOT VERIFIED WITH A METER
+//
+// The unit pulls that output up to ITS OWN VCC through 4.7k, and the Grove red
+// wire on this board is 5 V. If the pull-up really sits at 5 V then G1 idles
+// above the ESP32-S3 absolute maximum. M5 sells this unit for exactly these
+// hosts so the combination evidently survives, but nothing in their docs says
+// it is level shifted. Worth a meter before blaming firmware for anything odd.
+inline constexpr int kIrUnitRx = 1;   // white,  = kGroveScl
+inline constexpr int kIrUnitTx = 2;   // yellow, = kGroveSda
+
 // ---- onboard ---------------------------------------------------------------
 inline constexpr int kIrEmitter = 44;  // emitter only; the Adv has no receiver
 

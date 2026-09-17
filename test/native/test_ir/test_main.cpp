@@ -474,6 +474,118 @@ void test_nec_extended_is_told_apart_from_plain_nec() {
     TEST_ASSERT_EQUAL_UINT16(0x1234, b.address);
 }
 
+// ---- the three bugs an adversarial audit found ------------------------------
+
+void test_a_sony15_frame_is_not_decoded_as_a_truncated_sony12() {
+    // THE bug worth a test. The width used to be chosen from a RANGE
+    // (count >= 25 meant twelve bits), so a real 15-bit frame decoded as a
+    // 12-bit one with its top three address bits silently dropped -- a
+    // SUCCESSFUL decode of the wrong address, which is the one outcome this
+    // decoder is supposed to make impossible.
+    PulseTrain t;
+    TEST_ASSERT_TRUE(encode(Protocol::Sony15, 0x60, 0x15, t));
+
+    Decoded d;
+    TEST_ASSERT_TRUE(decode(t, d));
+    TEST_ASSERT_EQUAL(static_cast<int>(Protocol::Sony15), static_cast<int>(d.protocol));
+    TEST_ASSERT_EQUAL_UINT16(0x60, d.address);
+    TEST_ASSERT_EQUAL_UINT16(0x15, d.command);
+}
+
+void test_sony_widths_are_matched_exactly_not_by_range() {
+    // A count between the defined widths belongs to no SIRC frame. Rounding it
+    // down to the nearest width is how the bug above happened.
+    PulseTrain t;
+    TEST_ASSERT_TRUE(encode(Protocol::Sony20, 0x1A2B, 0x7F, t));
+    TEST_ASSERT_EQUAL_UINT8(42, t.count);
+
+    // Chop three intervals off: no longer any legal width.
+    t.count = 39;
+    Decoded d;
+    TEST_ASSERT_FALSE(decode(t, d));
+}
+
+void test_sony_still_forgives_only_the_missing_trailing_space() {
+    for (int w = 0; w < 3; w++) {
+        const Protocol p = w == 0 ? Protocol::Sony12
+                         : w == 1 ? Protocol::Sony15
+                                  : Protocol::Sony20;
+        PulseTrain t;
+        TEST_ASSERT_TRUE(encode(p, 1, 0x15, t));
+        t.count--;              // the receiver stopped at the last mark
+        Decoded d;
+        TEST_ASSERT_TRUE(decode(t, d));
+        TEST_ASSERT_EQUAL(static_cast<int>(p), static_cast<int>(d.protocol));
+        TEST_ASSERT_EQUAL_UINT16(0x15, d.command);
+    }
+}
+
+void test_every_rc5_command_survives_a_dropped_trailing_space() {
+    // An RC5 frame whose final half-bit is a space ends on silence, which a
+    // receiver never records. Requiring all 28 half-bits made exactly half of
+    // the 64 commands undecodable -- every one with a zero in the last bit.
+    int decoded = 0;
+    for (uint16_t cmd = 0; cmd < 64; cmd++) {
+        PulseTrain t;
+        TEST_ASSERT_TRUE(encode(Protocol::Rc5, 0x05, cmd, t));
+
+        // Simulate the receiver stopping at the last mark.
+        PulseTrain clipped = t;
+        clipped.count--;
+
+        Decoded d;
+        if (decode(clipped, d) && d.command == cmd && d.address == 0x05) decoded++;
+    }
+    TEST_ASSERT_EQUAL_INT(64, decoded);
+}
+
+void test_an_rc5x_frame_is_refused_rather_than_aliased() {
+    // In RC5X the SECOND start bit carries the inverted seventh command bit, so
+    // a frame with it clear is a command in 64..127. Reading it as plain RC5
+    // reports a command exactly 64 too low -- which replays as a DIFFERENT
+    // button. The encoder cannot emit RC5X, so refusing is the honest answer
+    // and the raw capture stays replayable byte-for-byte.
+    //
+    // Built by hand: start1=1, start2=0, toggle=0, address=5, command=0.
+    const uint16_t bits = static_cast<uint16_t>((1u << 13) | (0u << 12) |
+                                                (0u << 11) | (5u << 6) | 0u);
+    PulseTrain t;
+    bool level[28];
+    int n = 0;
+    for (int i = 13; i >= 0; i--) {
+        const bool one = (bits >> i) & 1;
+        level[n++] = !one;
+        level[n++] = one;
+    }
+    int start = 0;
+    while (start < n && !level[start]) start++;
+    int i = start;
+    while (i < n) {
+        int run = 1;
+        while (i + run < n && level[i + run] == level[i]) run++;
+        t.us[t.count++] = static_cast<uint16_t>(889 * run);
+        i += run;
+    }
+
+    Decoded d;
+    TEST_ASSERT_FALSE(decode(t, d));
+}
+
+void test_sony15_round_trips_at_its_boundaries() {
+    const uint16_t addrs[] = {0x00, 0x01, 0x7F, 0xFF};
+    for (uint16_t a : addrs) {
+        PulseTrain t;
+        TEST_ASSERT_TRUE(encode(Protocol::Sony15, a, 0x7F, t));
+        Decoded d;
+        TEST_ASSERT_TRUE(decode(t, d));
+        TEST_ASSERT_EQUAL_UINT16(a, d.address);
+        TEST_ASSERT_EQUAL_UINT16(0x7F, d.command);
+    }
+    // And an address that does not fit is refused, not truncated.
+    PulseTrain t;
+    TEST_ASSERT_FALSE(encode(Protocol::Sony15, 0x100, 0x00, t));
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
 
@@ -508,6 +620,13 @@ int main(int, char**) {
     RUN_TEST(test_noise_decodes_as_nothing);
     RUN_TEST(test_an_extended_address_of_complements_is_indistinguishable);
     RUN_TEST(test_nec_extended_is_told_apart_from_plain_nec);
+
+    RUN_TEST(test_a_sony15_frame_is_not_decoded_as_a_truncated_sony12);
+    RUN_TEST(test_sony_widths_are_matched_exactly_not_by_range);
+    RUN_TEST(test_sony_still_forgives_only_the_missing_trailing_space);
+    RUN_TEST(test_every_rc5_command_survives_a_dropped_trailing_space);
+    RUN_TEST(test_an_rc5x_frame_is_refused_rather_than_aliased);
+    RUN_TEST(test_sony15_round_trips_at_its_boundaries);
 
     return UNITY_END();
 }

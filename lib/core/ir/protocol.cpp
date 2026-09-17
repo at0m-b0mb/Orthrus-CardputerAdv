@@ -46,6 +46,7 @@ const char* protocolName(Protocol p) {
         case Protocol::Nec:         return "NEC";
         case Protocol::NecExtended: return "NEC ext";
         case Protocol::Sony12:      return "Sony 12";
+        case Protocol::Sony15:      return "Sony 15";
         case Protocol::Sony20:      return "Sony 20";
         case Protocol::Rc5:         return "RC5";
     }
@@ -55,6 +56,7 @@ const char* protocolName(Protocol p) {
 uint16_t carrierFor(Protocol p) {
     switch (p) {
         case Protocol::Sony12:
+        case Protocol::Sony15:
         case Protocol::Sony20: return 40000;
         case Protocol::Rc5:    return 36000;
         default:               return 38000;
@@ -66,6 +68,7 @@ uint16_t maxAddress(Protocol p) {
         case Protocol::Nec:         return 0xFF;
         case Protocol::NecExtended: return 0xFFFF;
         case Protocol::Sony12:      return 0x1F;    // 5 bits
+        case Protocol::Sony15:      return 0xFF;    // 8 bits
         case Protocol::Sony20:      return 0x1FFF;  // 13 bits
         case Protocol::Rc5:         return 0x1F;    // 5 bits
     }
@@ -77,6 +80,7 @@ uint16_t maxCommand(Protocol p) {
         case Protocol::Nec:
         case Protocol::NecExtended: return 0xFF;
         case Protocol::Sony12:
+        case Protocol::Sony15:
         case Protocol::Sony20:      return 0x7F;  // 7 bits
         case Protocol::Rc5:         return 0x3F;  // 6 bits
     }
@@ -86,6 +90,7 @@ uint16_t maxCommand(Protocol p) {
 uint32_t repeatGapUs(Protocol p) {
     switch (p) {
         case Protocol::Sony12:
+        case Protocol::Sony15:
         case Protocol::Sony20: return 45000;  // SIRC frames repeat every 45 ms
         case Protocol::Rc5:    return 114000;
         default:               return 40000;  // NEC repeats every ~110 ms total
@@ -128,9 +133,12 @@ bool encode(Protocol p, uint16_t address, uint16_t command, PulseTrain& out,
         }
 
         case Protocol::Sony12:
+        case Protocol::Sony15:
         case Protocol::Sony20: {
             const uint8_t cmdBits  = 7;
-            const uint8_t addrBits = (p == Protocol::Sony12) ? 5 : 13;
+            const uint8_t addrBits = (p == Protocol::Sony12) ? 5
+                                   : (p == Protocol::Sony15) ? 8
+                                                             : 13;
 
             push(out, kSonyHeaderMark);
             push(out, kSonySpace);
@@ -258,13 +266,26 @@ bool decodeSonyFamily(const PulseTrain& t, Decoded& out) {
     if (!within(t.us[0], kSonyHeaderMark)) return false;
     if (!within(t.us[1], kSonySpace)) return false;
 
-    // SIRC frames are 12, 15 or 20 bits. The final space is often missing from
-    // a capture because the receiver stops at the last mark, so the count is
-    // allowed to be one short.
+    // SIRC frames are 12, 15 or 20 bits, and the width has to be decided by an
+    // EXACT count, never a range.
+    //
+    // An earlier version tested `count >= 25` for twelve bits, which meant a
+    // real 15-bit frame (count 32) decoded as a 12-bit one with its top three
+    // address bits silently dropped -- a successful decode of the wrong
+    // address. That is precisely the failure this decoder claims to avoid, so
+    // the widths are now matched exactly, with the single documented allowance
+    // that the trailing space may be missing because a receiver stops at the
+    // last mark.
+    static const uint8_t kSircWidths[3] = {12, 15, 20};
     uint8_t bits = 0;
-    if (t.count >= 2 + 40 - 1)      bits = 20;
-    else if (t.count >= 2 + 24 - 1) bits = 12;
-    else return false;
+    for (uint8_t candidate : kSircWidths) {
+        const size_t full = 2 + static_cast<size_t>(candidate) * 2;
+        if (t.count == full || t.count == full - 1) {
+            bits = candidate;
+            break;
+        }
+    }
+    if (bits == 0) return false;
 
     uint32_t value = 0;
     for (uint8_t i = 0; i < bits; i++) {
@@ -288,6 +309,9 @@ bool decodeSonyFamily(const PulseTrain& t, Decoded& out) {
     if (bits == 12) {
         out.protocol = Protocol::Sony12;
         out.address  = static_cast<uint16_t>((value >> 7) & 0x1F);
+    } else if (bits == 15) {
+        out.protocol = Protocol::Sony15;
+        out.address  = static_cast<uint16_t>((value >> 7) & 0xFF);
     } else {
         out.protocol = Protocol::Sony20;
         out.address  = static_cast<uint16_t>((value >> 7) & 0x1FFF);
@@ -323,6 +347,20 @@ bool decodeRc5(const PulseTrain& t, Decoded& out) {
     halves[total++] = false;
     for (int i = 0; i < n && total < 32; i++) halves[total++] = level[i];
 
+    // And the mirror of that at the other end: a frame whose final half-bit is
+    // a SPACE ends on silence, which a receiver does not record either. Without
+    // this, every RC5 command with a zero in the last bit position -- half of
+    // all of them -- arrives one half-bit short and decodes as nothing.
+    if (total == 27) {
+        // Split across two statements deliberately: writing this as
+        // halves[total++] = !halves[total - 1] reads the index on both sides of
+        // a post-increment with no sequence point between them, which is
+        // undefined. Host clang happened to evaluate it the intended way and
+        // the tests passed; the Xtensa compiler flagged it.
+        halves[total] = !halves[total - 1];
+        total++;
+    }
+
     // 14 bits, two half-bits each.
     if (total < 28) return false;
 
@@ -336,6 +374,17 @@ bool decodeRc5(const PulseTrain& t, Decoded& out) {
 
     // Two start bits, then toggle, address, command.
     if (((bits >> 13) & 1) != 1) return false;
+
+    // The SECOND start bit is not a constant. In RC5X it carries the inverted
+    // seventh command bit, so a frame with it clear is an extended command in
+    // 64..127 -- and reading it as plain RC5 reports a command exactly 64 too
+    // low, which replays as a different button on the target.
+    //
+    // This encoder only emits plain RC5, so an RC5X frame is refused rather
+    // than decoded into something that cannot be re-encoded faithfully. The
+    // capture is still replayable verbatim, which is byte-exact.
+    if (((bits >> 12) & 1) != 1) return false;
+
     out.protocol = Protocol::Rc5;
     out.toggle   = ((bits >> 11) & 1) != 0;
     out.address  = static_cast<uint16_t>((bits >> 6) & 0x1F);
