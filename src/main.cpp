@@ -37,6 +37,7 @@
 #include "modules/wifi_networks.h"
 #include "modules/gps_location.h"
 #include "modules/ble_devices.h"
+#include "modules/ble_services.h"
 
 using namespace orthrus::theme;
 namespace bd = orthrus::board;
@@ -110,7 +111,7 @@ const ToolEntry kWifiTools[] = {
 
 const ToolEntry kBluetoothTools[] = {
     {Tool::BleDevices,  "Devices",  "Find BLE devices and hidden trackers", true},
-    {Tool::BleServices, "Services", "Connect and list what a device exposes", false},
+    {Tool::BleServices, "Services", "Connect and list what a device exposes", true},
 };
 
 const ToolEntry kNfcTools[] = {
@@ -442,6 +443,18 @@ void openTool(const ToolEntry& entry) {
                 return;
             }
             proximity.run();
+            return;
+        }
+
+        case Tool::BleServices: {
+            static orthrus::modules::BleServices services;
+            if (!services.begin()) {
+                failure("Services", "Bluetooth did not start.",
+                        "The BLE stack refused to come up.",
+                        "Power cycle and try again.");
+                return;
+            }
+            services.run();
             return;
         }
 

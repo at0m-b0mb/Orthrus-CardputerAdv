@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/at0m-b0mb/Orthrus-CardputerAdv/actions/workflows/ci.yml"><img src="https://github.com/at0m-b0mb/Orthrus-CardputerAdv/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/host%20tests-319%20passing-6FA86B" alt="319 host tests">
+  <img src="https://img.shields.io/badge/host%20tests-325%20passing-6FA86B" alt="325 host tests">
   <img src="https://img.shields.io/badge/on--device%20tests-52%20passing-6FA86B" alt="52 on-device tests">
   <img src="https://img.shields.io/badge/platform-Cardputer--Adv-B8893B" alt="Cardputer-Adv">
   <img src="https://img.shields.io/badge/licence-MIT-8A857C" alt="MIT">
@@ -417,6 +417,73 @@ computer; that leaves a trace this does not.
 
 ---
 
+## Learn — capturing a remote
+
+Send composes a frame from a protocol, address and command you already know,
+which covers a common TV. Learn covers what an engagement actually hits: a
+projector, a door controller or an AC unit whose codes are in nobody's
+database, with its remote sitting on the table.
+
+It needs the **M5Stack Unit IR** on the Grove port — the board has an emitter
+and no receiver. Which of the port's two signal lines carries the receiver is
+documented rather than guessed (M5's PinMap, schematic and shipped example all
+agree: **white = RX on G1**, yellow = TX on G2, and the receiver idles HIGH,
+pulling LOW on carrier). Both lines are listened to anyway, because a cable in
+the wrong way round would otherwise look like a dead screen, and the idle level
+is sampled rather than assumed so an inverted module still works.
+
+**Capture uses RMT, not a GPIO interrupt**, and the reason is invisible from the
+source. This framework ships with `CONFIG_ARDUINO_ISR_IRAM` unset, so the shared
+GPIO dispatcher is not in IRAM — marking a handler `IRAM_ATTR` buys nothing when
+the dispatcher ahead of it lives in flash, and every edge during an SD write is
+lost. That service is also install-once and shared, and RadioLib claims it the
+first time a LoRa surface opens. The RMT peripheral timestamps edges in hardware
+into its own RAM and needs no GPIO interrupt at all.
+
+**Replay re-encodes when it can.** A captured train carries the receiver's own
+bias — these modules stretch marks and shorten spaces — and replaying it
+verbatim hands our measurement error to the target. A decoded capture is
+re-encoded from its protocol, address and command; only an undecoded one is
+replayed raw, and the screen says which of the two it did.
+
+> One hardware caution, not verified with a meter: the unit pulls its receiver
+> output up to its own VCC, and the Grove red wire on this board is 5 V. If that
+> pull-up really sits at 5 V then G1 idles above the ESP32-S3 maximum. M5 sells
+> this unit for exactly these hosts so the combination evidently survives, but
+> nothing in their documentation says it is level shifted.
+
+---
+
+## Services — what a Bluetooth device exposes
+
+Devices finds what is advertising. This is the next question: connect to one and
+read its GATT database — the services, the characteristics inside them, and
+which of those anyone in range can read or write **without pairing at all**.
+That last part is the finding, and it is invisible from a scan. A writable
+characteristic on an unpaired device is the row this screen colours.
+
+Three things it is built around, all learned from reading the library's source
+rather than its documentation:
+
+- **Connect by address, never by pointer.** The Devices surface scans with
+  `setMaxResults(0)`, which makes NimBLE delete each advertised device the
+  moment the callback returns. Holding that pointer and connecting to it later
+  is a use-after-free. The address is copied out as six bytes and rebuilt.
+- **Nothing runs in the scan callback.** Connect, discovery and read all block
+  the calling task — and the scan callback *is* the NimBLE host task, so
+  blocking it deadlocks the stack against itself.
+- **Reading is opt-in, per characteristic.** `readValue()` silently starts a
+  pairing exchange if the peer answers with an authentication error, and that
+  wait has no timeout. It would also put a pairing prompt on somebody's phone
+  without the operator asking for one. So enumeration never reads; a value is
+  fetched only on a keypress, having said what that can trigger.
+
+Connecting freezes the screen for a few seconds, and the screen says so instead
+of animating a spinner it cannot honour — the library's calls block, and
+pretending otherwise would be a lie.
+
+---
+
 ## Evidence integrity
 
 A capture that ends as an editable CSV is an anecdote. Orthrus links every
@@ -520,11 +587,11 @@ pio run -t upload
 | `m` | Mark a waypoint (Location) · clear max-hold (Spectrum) |
 | `t` | Track log on/off (Location) |
 | `w` | Waypoint list (Location) |
-| `r` | Badge roll (Read Card) · retry the card (Evidence) · re-read (Clone) |
+| `r` | Badge roll (Read Card) · retry the card (Evidence) · re-read (Clone) · read a characteristic (Services) |
 | `e` | Export KML (Evidence) |
 | `h` | Toggle channel hopping (LoRa) |
 | `x` | Spectrum sweep (LoRa) |
-| `c` | Clear the capture (LoRa) |
+| `c` | Clear the capture (LoRa, Learn) |
 
 Arming is always its own step, and backing out clears it. Anything that
 transmits, writes or types needs `a` first and `enter` second.
@@ -537,7 +604,7 @@ Anything that decides whether a finding is true lives in `lib/core`, builds on
 the host, and is covered by tests. The firmware is glue around it.
 
 ```bash
-pio test -e native            # 319 host tests, no board required
+pio test -e native            # 325 host tests, no board required
 pio run -e selftest -t upload # 35 checks on the real device
 ```
 
@@ -579,7 +646,7 @@ lib/core/evidence/   tamper-evident hash chain
 src/hal/             board pins, SX1262 receive path, WS1850S reader
 src/app/             design tokens, drawing, category glyphs
 src/modules/         one file per surface
-test/native/         319 tests, no hardware needed
+test/native/         325 tests, no hardware needed
 tools/               screendump, mockup renderer, brand generator
 ```
 
@@ -594,12 +661,12 @@ tools/               screendump, mockup renderer, brand generator
 | Wi-Fi | **Clients** — see devices and the networks they seek | Working |
 | Wi-Fi | **Deauth** — test if clients can be forced off (802.11w) | Working |
 | Bluetooth | **Devices** — find BLE devices and hidden trackers | Working |
-| Bluetooth | **Services** — connect and list what a device exposes | Not built |
+| Bluetooth | **Services** — connect and list what a device exposes | Working |
 | NFC | **Read Card** — identify a badge and grade its exposure | Working |
 | RFID | **Test Keys** — try every published key on every sector | Working |
 | RFID | **Clone** — copy a card onto a blank you own | Working |
 | Infrared | **Send** — send remote codes to a TV, projector or AC | Working |
-| Infrared | **Learn** — capture a real remote's code, then replay it | Decoder done, capture not built |
+| Infrared | **Learn** — capture a real remote's code, then replay it | Working (needs the IR unit) |
 | LoRa | **Devices** — find LoRaWAN devices and grade them | Working |
 | LoRa | **Spectrum** — see what is transmitting across the band | Working |
 | GPS | **Location** — live fix, waypoints and track log | Working |
@@ -608,8 +675,8 @@ tools/               screendump, mockup renderer, brand generator
 | System | **Diagnostics** — battery, radio, GPS and sensors, live | Working |
 | System | **Files** — browse what is on the microSD card | Working |
 
-Anything not built says so on its own screen rather than presenting an empty
-menu.
+All eighteen are built. Learn is the only one needing hardware beyond the board
+itself: an M5Stack Unit IR on the Grove port.
 
 The menu is two levels: nine category tiles that fit on one screen with no
 scrolling, then the tools inside one. The first thing an operator knows when
