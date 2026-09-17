@@ -4,8 +4,8 @@
 
 <p align="center">
   <a href="https://github.com/at0m-b0mb/Orthrus-CardputerAdv/actions/workflows/ci.yml"><img src="https://github.com/at0m-b0mb/Orthrus-CardputerAdv/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/host%20tests-203%20passing-6FA86B" alt="203 host tests">
-  <img src="https://img.shields.io/badge/on--device%20tests-44%20passing-6FA86B" alt="44 on-device tests">
+  <img src="https://img.shields.io/badge/host%20tests-292%20passing-6FA86B" alt="292 host tests">
+  <img src="https://img.shields.io/badge/on--device%20tests-52%20passing-6FA86B" alt="52 on-device tests">
   <img src="https://img.shields.io/badge/platform-Cardputer--Adv-B8893B" alt="Cardputer-Adv">
   <img src="https://img.shields.io/badge/licence-MIT-8A857C" alt="MIT">
 </p>
@@ -166,6 +166,124 @@ dependency. It trusts the measured frame length over anything the card claims.
 
 ---
 
+## Harvest — WPA handshakes and PMKID
+
+Turns "the network uses WPA2" into a finding a client can act on: a captured
+handshake means the passphrase is subject to offline guessing, at the attacker's
+own pace, with nothing on the network able to see it happening or slow it down.
+
+**Passive, deliberately.** The usual way to force a handshake is to knock a
+client off the network and watch it reconnect. Orthrus does not do that. It
+listens — clients join networks constantly, and PMKID capture needs no client at
+all. The cost is honest and the screen says it out loud: you may sit on a
+channel and hear nothing, and that is a quiet channel, not a secure network.
+
+It produces two files per session:
+
+```
+/orthrus/harvest-NNN.22000   hashcat mode 22000, ready to crack elsewhere
+/orthrus/harvest-NNN.pcap    the frames themselves, for Wireshark or hcxtools
+```
+
+Cracking happens on a laptop with a GPU. This device captures and names what it
+has; it never claims to have recovered a passphrase, and a twenty-character
+random passphrase produces exactly the same capture as `password1`.
+
+Three details that decide whether a capture actually cracks, all covered by
+tests:
+
+- **Targets are keyed on the (access point, station) pair.** A busy AP runs a
+  separate handshake with every client, each with its own nonces and counters.
+  Mixing two produces a hash line that is internally inconsistent and will never
+  crack.
+- **The stored EAPOL frame has its MIC field zeroed**, because that is the form
+  both endpoints hashed.
+- **Replay counters are checked**, and when they do not line up the line is
+  still written — flagged, so the pairing is never mistaken for a
+  protocol-verified one.
+
+The channel lock (`l`) is the tactic that matters. Hopping means being deaf to
+twelve channels out of thirteen; once a target is chosen, staying on its channel
+is what catches the handshake. Dwell is three times longer on 1, 6 and 11, where
+almost every access point lives.
+
+Timestamps in the pcap come from `millis()` — this board has no real-time clock,
+so a capture opens at the epoch. The times are correct relative to each other,
+which is what reading a handshake needs.
+
+---
+
+## Proximity — Bluetooth
+
+Every phone, earbud, watch and luggage tag in a room shouts a small unencrypted
+packet several times a second. Proximity sorts that into things that matter.
+
+**The claim it will not make:** seeing a tracker is not seeing a stalker. A Find
+My advert means an Apple device is in offline-finding mode within about ten
+metres, right now. Whether it is *following* you is a different question — it
+needs the same tag seen in several places over hours — and the screen says so
+rather than raising an alarm it has not earned.
+
+Classification is drawn only from fields whose meaning is assigned by a registry
+or a published protocol. A device called "AirTag" classifies as a generic
+device, because a name is a string somebody typed.
+
+It also reports the one privacy fact that decides everything else: whether an
+address is **stable or rotating**. A resolvable private address changes every
+few minutes and cannot be followed between sightings at all.
+
+Passive by default. An **active** scan (`a`) transmits a scan request to every
+device it hears, which is how you get names out of devices that do not advertise
+one — and which means the device is no longer silent. That is a decision the
+operator makes knowingly, never a default.
+
+---
+
+## Keys — Mifare Classic sector sweep
+
+Credentials answers "what is this badge and how exposed is it" from
+anticollision alone. Keys answers what a client asks next: open it. Every
+sector, both key types, every published key, then read what is behind the ones
+that opened.
+
+The difference matters. A site that left the factory key on sector 0 and
+diversified the rest has a different problem from one that left all sixteen, and
+a report saying "default key accepted" cannot tell them apart. The sector map
+shows opened, tried-and-refused, and never-tried as three different things.
+
+**Read only.** It authenticates and reads. It never writes a block, never
+changes a key, never touches an access condition — an authorized test that
+bricks somebody's access card is a failed test.
+
+**And it is not a cracker.** No nested attack, no darkside, no hardnested. If a
+sector does not open with a published key, the honest answer on the screen is
+that we could not open it — not a longer grind that eventually claims a key this
+device never recovered.
+
+---
+
+## Position — GNSS
+
+Three states, kept visibly distinct because they need completely different
+responses and look identical on a lazy screen: **nothing** (no NMEA at all — a
+seating problem), **receiving** (sentences parsing, no fix yet), and **fix**.
+
+A fix comes with the radius it is actually good to, not just six decimal places.
+HDOP times a nominal 5 m user range error, rounded up, floored at the receiver's
+own limit — an order-of-magnitude statement, and the basis is written down. A
+device that quotes a two metre radius it cannot deliver is worse than one that
+quotes five.
+
+Waypoints (`m`) go into the evidence chain, not just into RAM, so they come out
+in the KML export with every other finding. A track log (`t`) writes a position
+every ten seconds.
+
+It also separates a bad sky from bad wiring: a receiver failing its own NMEA
+checksums is a cable fault, and the two look identical if you only count good
+sentences.
+
+---
+
 ## Payload (BadUSB)
 
 The ESP32-S3's native USB lets the Cardputer present itself as a keyboard and
@@ -293,15 +411,22 @@ pio run -t upload
 
 | Key | Does |
 | --- | --- |
-| `;` `.` | Move |
+| `;` `.` `,` `/` | Move — all four on the category grid, up/down in a list |
 | `enter` | Open |
 | `` ` `` | Back |
-| `h` | Toggle channel hopping |
-| `s` | Step spreading factor |
-| `x` | Spectrum sweep |
-| `c` | Clear the capture (in Census) |
-| `r` | Badge roll (in Credentials) |
-| `m` | Clear max-hold (in Spectrum) |
+| `h` | Toggle channel hopping (Airspace) |
+| `s` | Step spreading factor (Airspace) · save capture (Harvest) |
+| `x` | Spectrum sweep (Airspace) |
+| `c` | Clear the capture (Airspace) |
+| `r` | Badge roll (Credentials) · retry the card (Engagement) |
+| `m` | Clear max-hold (Spectrum) · mark a waypoint (Position) |
+| `l` | Lock to this target's channel (Harvest) |
+| `k` | Sweep every sector (Keys) |
+| `f` | Trackers only (Proximity) |
+| `a` | Active scan (Proximity) — transmits, see above |
+| `t` | Track log on/off (Position) |
+| `w` | Waypoint list (Position) |
+| `e` | Export KML (Engagement) |
 
 ---
 
@@ -311,7 +436,7 @@ Anything that decides whether a finding is true lives in `lib/core`, builds on
 the host, and is covered by tests. The firmware is glue around it.
 
 ```bash
-pio test -e native            # 203 host tests, no board required
+pio test -e native            # 292 host tests, no board required
 pio run -e selftest -t upload # 35 checks on the real device
 ```
 
@@ -341,16 +466,19 @@ Sanitizer — 3,000,000 hostile frames, zero findings — and that runs in CI.
 
 ```
 lib/core/lorawan/    parser, census, grader, channel plans   <- host-tested
+lib/core/dot11/      802.11 frames, EAPOL, hashcat and pcap   <- host-tested
+lib/core/ble/        BLE advert parsing and classification    <- host-tested
 lib/core/credential/ badge identification and grading         <- host-tested
 lib/core/wifi/       network identification and grading       <- host-tested
+lib/core/geo/        position formatting and error estimates  <- host-tested
 lib/core/ir/         infrared protocol encoders               <- host-tested
 lib/core/ducky/      HID keymap and DuckyScript parser        <- host-tested
 lib/core/crypto/     SHA-256, checked against the NIST vectors
 lib/core/evidence/   tamper-evident hash chain
 src/hal/             board pins, SX1262 receive path, WS1850S reader
-src/app/             design tokens and drawing
-src/modules/         Airspace, Spectrum and Credentials
-test/native/         203 tests, no hardware needed
+src/app/             design tokens, drawing, category glyphs
+src/modules/         one file per surface
+test/native/         292 tests, no hardware needed
 tools/               screendump, mockup renderer, brand generator
 ```
 
@@ -358,17 +486,25 @@ tools/               screendump, mockup renderer, brand generator
 
 ## Status
 
-| Surface | State |
-| --- | --- |
-| **Airspace** — LoRa/LoRaWAN census and grading | Working |
-| **Spectrum** — live band sweep with max-hold | Working |
-| **Perimeter** — Wi-Fi survey, graded, geotagged | Working |
-| **Credentials** — 13.56 MHz badge identify and grade | Working |
-| **Control** — infrared room control | Working (transmit; capture needs the IR unit) |
-| **Payload** — USB keyboard scripts | Working, in the `cardputer-adv-hid` build |
-| **Engagement** — evidence log, chain head, KML export | Working |
+| Category | Surface | State |
+| --- | --- | --- |
+| Wi-Fi | **Perimeter** — survey, graded, geotagged | Working |
+| Wi-Fi | **Harvest** — WPA handshake and PMKID capture | Working |
+| Bluetooth | **Proximity** — BLE device and tracker recon | Working |
+| NFC | **Credentials** — 13.56 MHz badge identify and grade | Working |
+| RFID | **Keys** — Mifare Classic sector key sweep | Working |
+| Infrared | **Control** — room control | Working (transmit; capture needs the IR unit) |
+| LoRa | **Airspace** — LoRa/LoRaWAN census and grading | Working |
+| LoRa | **Spectrum** — live band sweep with max-hold | Working |
+| GPS | **Position** — live fix, waypoints, track log | Working |
+| USB | **Payload** — keyboard scripts | Working, in the `cardputer-adv-hid` build |
+| System | **Engagement** — evidence log, chain head, KML export | Working |
+| System | **Instruments** — live power, radio, GNSS, tilt | Working |
 
-Unbuilt surfaces say so on screen rather than presenting empty menus.
+The menu is two levels: nine category tiles that fit on one screen with no
+scrolling, then the tools inside one. The first thing an operator knows when
+they pick the device up is which radio they are about to point at something, so
+that is the first choice.
 
 **Not yet proven:** the receive front end is confirmed alive and confirmed to
 retune, but decoding real over-the-air LoRaWAN has not been demonstrated yet —
@@ -382,9 +518,16 @@ discover.
 **No deauthentication, jamming, or RF/BLE flooding.** Not an oversight — a
 decision, for three reasons. It is denial of service rather than assessment. It
 is the single feature that gets devices like this pulled from sale and their
-sellers into regulatory trouble. And it is unnecessary: a captive-portal evil
-twin works on new associations, and detecting deauth is better served by a
-purpose-built detector.
+sellers into regulatory trouble. And it is unnecessary: Harvest catches
+handshakes from clients joining on their own, and PMKID capture needs no client
+at all.
+
+**No key recovery against Crypto1.** Keys tries the published dictionary and
+stops. No nested, darkside or hardnested attack. If a sector does not open with
+a key anyone can look up, the finding is that we could not open it.
+
+**No passphrase cracking on the device.** Harvest exports a hashcat file. A
+handheld pretending to crack WPA would be pretending.
 
 ---
 

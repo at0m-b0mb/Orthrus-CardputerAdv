@@ -76,6 +76,39 @@ public:
     // How many attempts probeDefaultKeys will make, for a progress indicator.
     static uint16_t probeAttemptCount();
 
+    // ---- sector-level access, for the Keys surface --------------------------
+    //
+    // probeDefaultKeys answers one question about sector 0. These answer the
+    // question an operator actually has in front of a client: how much of THIS
+    // card is still sitting behind a factory key, and what is written in it.
+    //
+    // Still read only. Nothing here writes a block, changes a key, or touches
+    // an access condition. A badge that leaves the reader is byte for byte the
+    // badge that arrived on it.
+
+    // Tries every published key, A then B, against one sector.
+    //
+    // On success Crypto1 is left ACTIVE so the caller can read the sector's
+    // blocks immediately -- an authentication does not survive a reselect, so
+    // opening and reading have to happen in the same breath. Call endSector()
+    // when finished with it.
+    bool openSector(uint8_t sector, const credential::TagIdentity& tag,
+                    uint8_t* keyIndexOut = nullptr, uint8_t* keyTypeOut = nullptr);
+
+    // Reads one 16 byte block. Only meaningful between a successful
+    // openSector() and the matching endSector().
+    ReaderStatus readBlock(uint8_t block, uint8_t out[16]);
+
+    // Drops the cipher and puts the card back to sleep.
+    void endSector();
+
+    // Mifare Classic geometry, from the SAK. A 4K card's last eight sectors
+    // hold sixteen blocks rather than four, which is the detail that turns a
+    // naive dump into a read off the end of the card.
+    static uint8_t sectorCount(uint8_t sak);
+    static uint8_t blocksInSector(uint8_t sector);
+    static uint8_t firstBlockOfSector(uint8_t sector);
+
     // True if the card answered anticollision at least once during the last
     // probe. Without this, a card lifted off the reader mid-probe is
     // indistinguishable from a card that refused every key -- and reporting
@@ -123,5 +156,21 @@ private:
 };
 
 const char* readerStatusName(ReaderStatus s);
+
+// One reader for the whole device.
+//
+// Two surfaces now want the card reader, and two Rfid2 instances would each
+// hold their own idea of which bus it answered on and which card is currently
+// selected. Sharing one means a badge left on the reader while the operator
+// moves from Credentials to Keys is still the same badge.
+Rfid2& sharedReader();
+
+// Finds the reader on either Grove port and initialises it. Safe to call
+// repeatedly; only the first successful call does the probing.
+//
+// `busNameOut` receives a short label for the status line: "Port A" for the
+// board's own port, "cap" for the LoRa cap's pass-through, "none" if neither
+// answered.
+bool openSharedReader(const char** busNameOut = nullptr);
 
 }  // namespace orthrus::hal

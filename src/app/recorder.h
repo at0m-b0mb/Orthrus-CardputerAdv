@@ -48,6 +48,21 @@ public:
     const char* path() const { return path_; }
     const char* lastError() const { return lastError_; }
 
+    // Card facts, for the diagnostics screen. Zero means "not mounted", which
+    // is exactly what the screen should say rather than showing 0 MB.
+    uint32_t cardMiB() const { return cardMiB_; }
+    uint32_t mountHz() const { return mountHz_; }
+
+    // Whether a mount has been attempted at all this boot. The mount is lazy,
+    // so "no card" and "we have not looked yet" are different states and
+    // showing them the same way is what makes a working card look broken.
+    bool attempted() const { return attempted_; }
+
+    // Forces another mount attempt. The lazy open deliberately tries once per
+    // boot so a missing card does not stall every capture loop; this is how the
+    // operator says "I have just pushed it in properly, look again".
+    void retry();
+
     // The head digest, hex, NUL-terminated. 65 bytes required.
     void headHex(char out[65]) const;
 
@@ -66,6 +81,8 @@ private:
     const char* lastError_ = "";
     uint32_t    failures_  = 0;
     bool        attempted_ = false;
+    uint32_t    cardMiB_   = 0;
+    uint32_t    mountHz_   = 0;
 };
 
 // One recorder for the whole device: every surface writes into the same

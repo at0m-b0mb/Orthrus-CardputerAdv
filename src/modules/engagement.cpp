@@ -158,6 +158,22 @@ void Engagement::draw() {
     else              ui::textRight(kValueX, y, kCritical, "%s", rec.lastError());
     y += kRowH;
 
+    // The card itself, separately from the session. "No card" and "a card that
+    // mounted but the session file would not open" need different responses
+    // from the operator, and one line reading "no card" for both is what makes
+    // a working card look broken.
+    ui::textAt(kLabelX, y, kMuted, "card");
+    if (rec.cardMiB()) {
+        ui::textRight(kValueX, y, kText, "%lu MB at %lu MHz",
+                      static_cast<unsigned long>(rec.cardMiB()),
+                      static_cast<unsigned long>(rec.mountHz() / 1000000));
+    } else if (!rec.attempted()) {
+        ui::textRight(kValueX, y, kFaint, "not looked yet");
+    } else {
+        ui::textRight(kValueX, y, kCritical, "not mounted -- r to retry");
+    }
+    y += kRowH;
+
     ui::textAt(kLabelX, y, kMuted, "records");
     ui::textRight(kValueX, y, kText, "%lu",
                   static_cast<unsigned long>(rec.count()));
@@ -193,7 +209,8 @@ void Engagement::draw() {
         ui::textRight(kValueX, y + 6, kFaint, "no session");
     }
 
-    ui::footer("e export KML   ` back");
+    ui::footer(rec.active() ? "e export KML   ` back"
+                            : "r retry card   ` back");
     ui::endFrame();
 }
 
@@ -223,6 +240,13 @@ bool Engagement::handleKeys() {
     for (char c : ks.word) {
         if (c == kKeyBack) return false;
         if (c == 'e') { exportKml(); return true; }
+        if (c == 'r') {
+            // The mount is deliberately attempted once per boot so a missing
+            // card cannot stall every capture loop. This is the operator
+            // saying they have just seated it properly.
+            app::recorder().retry();
+            return true;
+        }
     }
     return true;
 }

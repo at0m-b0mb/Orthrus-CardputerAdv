@@ -52,8 +52,10 @@ private:
 
     int findInRoll(const credential::TagIdentity& t) const;
 
-    hal::Gnss& gnss_ = hal::sharedGnss();
-    hal::Rfid2 reader_;
+    hal::Gnss&  gnss_ = hal::sharedGnss();
+    // Shared with Keys: a badge left on the reader while the operator moves
+    // between the two surfaces is still the same badge.
+    hal::Rfid2& reader_ = hal::sharedReader();
     const char* probeNote_ = nullptr;
     char        probeBuf_[64] = {0};
     const char* busName_ = "none";

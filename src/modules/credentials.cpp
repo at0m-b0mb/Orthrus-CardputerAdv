@@ -40,21 +40,9 @@ void uidToHex(const cr::TagIdentity& t, char* out, size_t cap) {
 }  // namespace
 
 bool Credentials::begin() {
-    // The reader can be on either port. Try the board's own Port A first, then
-    // the cap's pass-through. Confirmed on hardware: with both units fitted the
-    // NFC Universal sits at 0x50 on Port A and the RFID2 at 0x28 on the cap.
-    M5.Ex_I2C.begin(I2C_NUM_0, bd::kGroveSda, bd::kGroveScl);
-
-    if (reader_.begin(&M5.Ex_I2C)) {
-        busName_ = "Port A";
-        return true;
-    }
-    if (reader_.begin(&M5.In_I2C)) {
-        busName_ = "cap";
-        return true;
-    }
-    busName_ = "none";
-    return false;
+    // Port probing lives in the HAL now, because Keys needs the same reader on
+    // the same port and two copies of that logic would eventually disagree.
+    return hal::openSharedReader(&busName_);
 }
 
 int Credentials::findInRoll(const cr::TagIdentity& t) const {

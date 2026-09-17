@@ -336,6 +336,74 @@ void testSharedBusStress() {
 }
 
 // ---------------------------------------------------------------------------
+// The microSD card, WITHOUT the radio.
+//
+// This runs before anything touches the SX1262, and that ordering is the whole
+// point of the test. Bus bring-up used to live inside LoraRadio::begin(), so
+// the card was only ever found on a boot where a radio surface had been opened
+// first -- and the device then reported "no microSD card", which is a very
+// convincing thing to say about a card that is sitting right there.
+//
+// If this passes and the radio has not started, the bug has not come back.
+// ---------------------------------------------------------------------------
+
+void testSdWithoutRadio() {
+    banner("microSD, before the radio");
+    check(!g_radioUp, "radio has not been started yet");
+
+    orthrus::hal::beginSharedSpi();
+
+    // The same ladder the recorder uses. A shared bus with a cap on top of it
+    // has longer traces than the card expects, and plenty of healthy cards
+    // refuse 20 MHz while working perfectly at 4.
+    static constexpr uint32_t kSpeeds[] = {20000000, 10000000, 4000000};
+    uint32_t mountedAt = 0;
+    for (uint32_t hz : kSpeeds) {
+        if (SD.begin(bd::kSdCs, orthrus::hal::sharedSpi(), hz)) {
+            mountedAt = hz;
+            break;
+        }
+        SD.end();
+        delay(20);
+    }
+
+    if (mountedAt == 0) {
+        Serial.println("  [info] no card mounted at any speed");
+        check(false, "microSD mounts on the shared bus");
+        return;
+    }
+
+    Serial.printf("  [info] mounted at %lu MHz, type %d, %llu MB\n",
+                  static_cast<unsigned long>(mountedAt / 1000000),
+                  static_cast<int>(SD.cardType()),
+                  SD.cardSize() / (1024ULL * 1024ULL));
+    check(true, "microSD mounts on the shared bus");
+    check(mountedAt == 20000000, "mounts at full speed (informational)");
+    check(SD.cardType() != CARD_NONE, "card identifies itself");
+
+    // Mounting is not the same as being usable. Write, read back, compare.
+    const char* path = "/orthrus_sdprobe.txt";
+    const char* want = "orthrus sd probe";
+    File w = SD.open(path, FILE_WRITE);
+    check(static_cast<bool>(w), "can create a file");
+    if (w) {
+        w.print(want);
+        w.close();
+    }
+
+    char got[32] = {0};
+    File r = SD.open(path, FILE_READ);
+    check(static_cast<bool>(r), "can reopen it");
+    if (r) {
+        const size_t n = r.readBytes(got, sizeof(got) - 1);
+        got[n] = 0;
+        r.close();
+    }
+    check(std::strcmp(got, want) == 0, "reads back exactly what was written");
+    SD.remove(path);
+}
+
+// ---------------------------------------------------------------------------
 // 4. Leak soak.
 //
 // The capture loop runs for hours. Anything that leaks a few bytes a frame ends
@@ -626,6 +694,8 @@ void setup() {
 
     testPower();
     testEngineParity();
+    // Before the radio, deliberately: see the note on the test itself.
+    testSdWithoutRadio();
     testRadioBringUp();
     testRadioParamChanges();
     testRadioSweep();

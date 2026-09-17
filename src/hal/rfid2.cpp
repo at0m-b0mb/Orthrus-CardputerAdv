@@ -53,6 +53,7 @@ constexpr uint8_t PICC_AUTH_KEY_B = 0x61;
 constexpr uint8_t PICC_SEL_CL1 = 0x93;
 constexpr uint8_t PICC_SEL_CL2 = 0x95;
 constexpr uint8_t PICC_SEL_CL3 = 0x97;
+constexpr uint8_t PICC_MF_READ = 0x30;
 
 // Cascade tag: when a UID is longer than 4 bytes, the first byte of a cascade
 // level is this marker rather than UID data.
@@ -461,6 +462,125 @@ bool Rfid2::probeDefaultKeys(credential::TagIdentity& tag, uint8_t* keyIndexOut,
         }
     }
     return false;
+}
+
+// ---- sector-level access -----------------------------------------------------
+
+uint8_t Rfid2::sectorCount(uint8_t sak) {
+    // SAK bits 3 and 4 carry the size for Crypto1 cards. Mini is a 1K SAK with
+    // a smaller memory, and there is no way to tell it apart from a 1K without
+    // reading past its end -- so it is treated as 1K and the read simply fails
+    // on the sectors that are not there, which is reported rather than hidden.
+    if ((sak & 0x08) == 0) return 0;      // not Crypto1 at all
+    if (sak & 0x10) return 40;            // 4K
+    return 16;                            // 1K
+}
+
+uint8_t Rfid2::blocksInSector(uint8_t sector) {
+    // The first 32 sectors of a 4K card hold four blocks; the last eight hold
+    // sixteen. Assuming four everywhere reads the wrong blocks for the whole
+    // top third of a 4K badge.
+    return sector < 32 ? 4 : 16;
+}
+
+uint8_t Rfid2::firstBlockOfSector(uint8_t sector) {
+    if (sector < 32) return static_cast<uint8_t>(sector * 4);
+    return static_cast<uint8_t>(128 + (sector - 32) * 16);
+}
+
+bool Rfid2::openSector(uint8_t sector, const credential::TagIdentity& tag,
+                       uint8_t* keyIndexOut, uint8_t* keyTypeOut) {
+    if (!present_) return false;
+    if (!tag.isClassicCompatible()) return false;
+
+    const credential::DefaultKey* keys = credential::defaultKeys();
+    const size_t n = credential::defaultKeyCount();
+    const uint8_t block = firstBlockOfSector(sector);
+
+    for (uint8_t type = 0; type < 2; type++) {
+        const uint8_t cmd = type == 0 ? PICC_AUTH_KEY_A : PICC_AUTH_KEY_B;
+        for (size_t i = 0; i < n; i++) {
+            // A failed authentication leaves the card mute, so it has to be
+            // taken back through anticollision before the next attempt. This
+            // is why a full sweep is slow, and why the screen shows progress
+            // rather than appearing to hang.
+            credential::TagIdentity again;
+            if (reselect(again) != ReaderStatus::Ok) {
+                stopCrypto1();
+                delay(5);
+                continue;
+            }
+
+            if (authenticate(cmd, block, keys[i].key, again) == ReaderStatus::Ok) {
+                // Crypto1 deliberately left running: the caller reads the
+                // sector's blocks now or not at all.
+                if (keyIndexOut) *keyIndexOut = static_cast<uint8_t>(i);
+                if (keyTypeOut)  *keyTypeOut  = type;
+                return true;
+            }
+            stopCrypto1();
+        }
+    }
+    return false;
+}
+
+ReaderStatus Rfid2::readBlock(uint8_t block, uint8_t out[16]) {
+    if (!present_) return ReaderStatus::NotPresent;
+
+    uint8_t tx[4] = {PICC_MF_READ, block, 0, 0};
+    if (!calculateCrc(tx, 2, &tx[2])) return ReaderStatus::ProtocolError;
+
+    uint8_t rx[18] = {0};
+    uint8_t rxLen  = sizeof(rx);
+    const ReaderStatus st =
+        transceive(tx, 4, 0, rx, rxLen, nullptr, /*checkCrc=*/true);
+    if (st != ReaderStatus::Ok) return st;
+
+    // A short answer is a NAK or a truncated frame, not sixteen bytes of data.
+    // Copying it anyway would put whatever was already in the buffer into a
+    // dump the operator hands to a client.
+    if (rxLen < 18) return ReaderStatus::ProtocolError;
+
+    std::memcpy(out, rx, 16);
+    return ReaderStatus::Ok;
+}
+
+void Rfid2::endSector() {
+    stopCrypto1();
+    halt();
+}
+
+// ---- the shared reader -------------------------------------------------------
+
+Rfid2& sharedReader() {
+    static Rfid2 instance;
+    return instance;
+}
+
+bool openSharedReader(const char** busNameOut) {
+    static const char* busName = "none";
+
+    Rfid2& r = sharedReader();
+    if (r.present()) {
+        if (busNameOut) *busNameOut = busName;
+        return true;
+    }
+
+    // The reader can be on either port. Try the board's own Port A first, then
+    // the cap's pass-through. Confirmed on hardware: with both units fitted the
+    // NFC Universal sits at 0x50 on Port A and the RFID2 at 0x28 on the cap.
+    M5.Ex_I2C.begin(I2C_NUM_0, board::kGroveSda, board::kGroveScl);
+
+    if (r.begin(&M5.Ex_I2C)) {
+        busName = "Port A";
+    } else if (r.begin(&M5.In_I2C)) {
+        busName = "cap";
+    } else {
+        busName = "none";
+    }
+
+    if (busNameOut) *busNameOut = busName;
+    return r.present();
 }
 
 void Rfid2::halt() {

@@ -36,7 +36,7 @@ bool LoraRadio::begin() {
     // second init would also silently discard the tuning we were using.
     if (ready_) return true;
 
-    g_spi.begin(bd::kLoraSck, bd::kLoraMiso, bd::kLoraMosi, bd::kLoraCs);
+    beginSharedSpi();
 
     // Deliberately not RadioLib's defaults:
     //  - TCXO at 1.8 V on DIO3. This module carries a TCXO and RadioLib assumes
@@ -200,6 +200,37 @@ void LoraRadio::idle() {
 }
 
 SPIClass& sharedSpi() { return g_spi; }
+
+void beginSharedSpi() {
+    // Idempotent. Both the radio and the SD driver call it, and whichever gets
+    // there first wins; calling SPIClass::begin() twice on a live bus is the
+    // kind of thing that works until it does not.
+    static bool started = false;
+    if (started) return;
+
+    // EVERY chip select on this bus is deasserted before the bus is used, not
+    // just the one we are about to talk to.
+    //
+    // Measured on hardware, and it cost an afternoon: with the SX1262's NSS
+    // left floating after power-up, the radio believes it is selected and
+    // drives MISO. The SD card's replies come back over the top of it, the
+    // mount fails at every clock rate, and the device reports "no microSD card"
+    // about a card that is sitting right there. Starting a radio surface first
+    // hid the bug completely, because RadioLib's own init drives NSS high on
+    // its way past.
+    //
+    // The self-test proves this the only way that means anything: it mounts the
+    // card BEFORE the radio is ever initialised.
+    pinMode(bd::kLoraRst, OUTPUT);
+    digitalWrite(bd::kLoraRst, HIGH);   // NRESET is active low; leave it idle
+    pinMode(bd::kLoraCs, OUTPUT);
+    digitalWrite(bd::kLoraCs, HIGH);
+    pinMode(bd::kSdCs, OUTPUT);
+    digitalWrite(bd::kSdCs, HIGH);
+
+    g_spi.begin(bd::kLoraSck, bd::kLoraMiso, bd::kLoraMosi, bd::kLoraCs);
+    started = true;
+}
 
 LoraRadio& sharedRadio() {
     static LoraRadio instance;

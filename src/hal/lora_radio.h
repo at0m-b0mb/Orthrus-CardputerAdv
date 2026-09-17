@@ -81,4 +81,14 @@ LoraRadio& sharedRadio();
 // calling begin() again on the same pins behind the radio's back.
 SPIClass& sharedSpi();
 
+// Brings that bus up. Idempotent, and it MUST be called before anything uses
+// the bus.
+//
+// This exists because of a real bug: bus bring-up used to live inside
+// LoraRadio::begin(), so a microSD card was only ever found if the operator had
+// opened a radio surface first. Go straight to the evidence log on a fresh boot
+// and the card "was not there" -- on a bus with no pins assigned to it, nothing
+// is. Whichever of the two devices is wanted first has to be able to start it.
+void beginSharedSpi();
+
 }  // namespace orthrus::hal

@@ -69,16 +69,60 @@ bool Recorder::begin() {
     if (attempted_) return false;
     attempted_ = true;
 
+    // The bus has to be up before the card can be found on it. This used to be
+    // done only by the radio, which meant the card was invisible on any boot
+    // where a radio surface had not been opened first -- and "no microSD card"
+    // is a very convincing thing for a device to say when the real problem is
+    // that nothing had assigned pins to the SPI bus yet.
+    hal::beginSharedSpi();
+
     // Shares the bus with the radio; only the chip selects differ.
-    if (!SD.begin(board::kSdCs, hal::sharedSpi(), 20000000)) {
+    //
+    // Three speeds, fastest first. A shared bus with a cap on top of it has
+    // longer traces than the SD card was designed for, and plenty of otherwise
+    // healthy cards refuse to enumerate at 20 MHz while working perfectly at 4.
+    // Reporting "no card" because of a clock rate would send someone hunting
+    // for a fault in the wrong place.
+    static constexpr uint32_t kSpeeds[] = {20000000, 10000000, 4000000};
+    bool mounted = false;
+    for (uint32_t hz : kSpeeds) {
+        if (SD.begin(board::kSdCs, hal::sharedSpi(), hz)) {
+            mounted = true;
+            mountHz_ = hz;
+            break;
+        }
+        SD.end();
+        delay(20);
+    }
+
+    if (!mounted) {
         lastError_ = "no microSD card";
         active_    = false;
         return false;
     }
+
+    // A card that mounts but reports no type is not a card we should write an
+    // engagement to.
+    if (SD.cardType() == CARD_NONE) {
+        lastError_ = "card did not identify itself";
+        active_    = false;
+        SD.end();
+        return false;
+    }
+    cardMiB_ = static_cast<uint32_t>(SD.cardSize() / (1024ULL * 1024ULL));
     if (!openSessionFile()) return false;
 
     note(RecordKind::SessionStart, "orthrus session opened");
     return true;
+}
+
+void Recorder::retry() {
+    // Only the "we looked and found nothing" state is worth retrying. An open
+    // session must not be torn down and reopened underneath a running capture.
+    if (active_) return;
+    attempted_ = false;
+    lastError_ = "";
+    begin();
 }
 
 bool Recorder::note(RecordKind kind, const char* detail) {

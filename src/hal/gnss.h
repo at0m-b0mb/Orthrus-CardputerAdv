@@ -41,6 +41,31 @@ public:
     uint8_t hour() { return gps_.time.hour(); }
     uint8_t minute() { return gps_.time.minute(); }
     uint8_t second() { return gps_.time.second(); }
+    uint16_t year() { return gps_.date.year(); }
+    uint8_t month() { return gps_.date.month(); }
+    uint8_t day() { return gps_.date.day(); }
+
+    // How stale the position is, in milliseconds. A fix that stopped updating
+    // thirty seconds ago is not a fix, however valid the last one looked.
+    uint32_t locationAgeMs() { return gps_.location.age(); }
+
+    double altitudeMeters() {
+        return gps_.altitude.isValid() ? gps_.altitude.meters() : 0.0;
+    }
+    bool hasAltitude() { return gps_.altitude.isValid(); }
+
+    double speedKmph() { return gps_.speed.isValid() ? gps_.speed.kmph() : 0.0; }
+    bool hasSpeed() { return gps_.speed.isValid(); }
+
+    double courseDegrees() {
+        return gps_.course.isValid() ? gps_.course.deg() : 0.0;
+    }
+    bool hasCourse() { return gps_.course.isValid(); }
+
+    // Sentences the parser rejected. A receiver that is talking but failing its
+    // own checksums is a wiring problem, not a sky problem, and the two look
+    // identical if you only count good sentences.
+    uint32_t checksumFailures() { return gps_.failedChecksum(); }
 
     // Horizontal dilution of precision: how much the satellite geometry is
     // degrading the fix. Under 2 is good, over 5 is barely worth having.
