@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/at0m-b0mb/Orthrus-CardputerAdv/actions/workflows/ci.yml"><img src="https://github.com/at0m-b0mb/Orthrus-CardputerAdv/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/host%20tests-167%20passing-6FA86B" alt="167 host tests">
+  <img src="https://img.shields.io/badge/host%20tests-203%20passing-6FA86B" alt="203 host tests">
   <img src="https://img.shields.io/badge/on--device%20tests-44%20passing-6FA86B" alt="44 on-device tests">
   <img src="https://img.shields.io/badge/platform-Cardputer--Adv-B8893B" alt="Cardputer-Adv">
   <img src="https://img.shields.io/badge/licence-MIT-8A857C" alt="MIT">
@@ -166,6 +166,41 @@ dependency. It trusts the measured frame length over anything the card claims.
 
 ---
 
+## Payload (BadUSB)
+
+The ESP32-S3's native USB lets the Cardputer present itself as a keyboard and
+type a DuckyScript the operator wrote. It needs no extra hardware.
+
+```bash
+pio run -e cardputer-adv-hid -t upload
+```
+
+**Why a separate build.** HID requires TinyUSB (`ARDUINO_USB_MODE=0`), and the
+default build uses the hardware USB-JTAG — which is exactly why flashing it
+never needs the BOOT button. Under mode 0 esptool cannot reset the board on its
+own, so that environment runs a 1200-baud touch reset before upload, which the
+Arduino USB stack answers by rebooting into the ROM bootloader. Measured, not
+assumed: without the touch, flashing fails with *"No serial data received"*.
+
+**How it behaves:**
+
+- Payloads come from **your** SD card, in `/orthrus/payloads`. None are shipped
+  onto it. A payload should be one you have read; there is a harmless example in
+  [docs/payloads](docs/payloads) to copy across and try.
+- Nothing runs on boot, on plug-in, or on opening the screen.
+- The script is **parsed and validated before it can be armed**, so an
+  unrecognised line is found in your hand rather than in front of a target. The
+  screen names the line number and the offending word.
+- Arming and firing are separate keys, and backing out always disarms.
+- Any key aborts mid-run, modifiers are always released, and every run is
+  written to the evidence log.
+
+The keymap is US layout and the code says so. A payload written for US typed
+against a UK or German layout produces mangled input, because the host decides
+what a keycode means.
+
+---
+
 ## Evidence integrity
 
 A capture that ends as an editable CSV is an anecdote. Orthrus links every
@@ -276,7 +311,7 @@ Anything that decides whether a finding is true lives in `lib/core`, builds on
 the host, and is covered by tests. The firmware is glue around it.
 
 ```bash
-pio test -e native            # 167 host tests, no board required
+pio test -e native            # 203 host tests, no board required
 pio run -e selftest -t upload # 35 checks on the real device
 ```
 
@@ -309,12 +344,13 @@ lib/core/lorawan/    parser, census, grader, channel plans   <- host-tested
 lib/core/credential/ badge identification and grading         <- host-tested
 lib/core/wifi/       network identification and grading       <- host-tested
 lib/core/ir/         infrared protocol encoders               <- host-tested
+lib/core/ducky/      HID keymap and DuckyScript parser        <- host-tested
 lib/core/crypto/     SHA-256, checked against the NIST vectors
 lib/core/evidence/   tamper-evident hash chain
 src/hal/             board pins, SX1262 receive path, WS1850S reader
 src/app/             design tokens and drawing
 src/modules/         Airspace, Spectrum and Credentials
-test/native/         167 tests, no hardware needed
+test/native/         203 tests, no hardware needed
 tools/               screendump, mockup renderer, brand generator
 ```
 
@@ -329,6 +365,7 @@ tools/               screendump, mockup renderer, brand generator
 | **Perimeter** — Wi-Fi survey, graded, geotagged | Working |
 | **Credentials** — 13.56 MHz badge identify and grade | Working |
 | **Control** — infrared room control | Working (transmit; capture needs the IR unit) |
+| **Payload** — USB keyboard scripts | Working, in the `cardputer-adv-hid` build |
 | **Engagement** — evidence log, chain head, KML export | Working |
 
 Unbuilt surfaces say so on screen rather than presenting empty menus.

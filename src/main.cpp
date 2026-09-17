@@ -14,6 +14,8 @@
 #include "modules/credentials.h"
 #include "modules/engagement.h"
 #include "modules/control.h"
+#include "hal/hid.h"
+#include "modules/payload.h"
 #include "modules/perimeter.h"
 #include "modules/instruments.h"
 
@@ -34,9 +36,15 @@ constexpr char kKeyDown = '.';
 // for the selected item, is what actually fits -- and it reads better.
 // Six rows at 15 px ran the list under the detail strip. 14 px fits:
 // 21 + 6*14 = 105, rule at 107, description at 111, footer from 123.
+//
+// Seven surfaces no longer fit at all, so the list scrolls rather than
+// shrinking the rows further -- below 14 px the UI face starts clipping.
 constexpr int kListTop    = 21;
 constexpr int kRowH       = 14;
+constexpr int kVisibleRows = 6;
 constexpr int kDetailRule = 107;
+
+int g_scroll = 0;
 
 struct Surface {
     const char* name;
@@ -52,6 +60,7 @@ const Surface kSurfaces[] = {
     {"Credentials", "13.56 MHz badge identify and grade", true},
     {"Control",     "Infrared room control (onboard)",  true},
     {"Engagement",  "Evidence log, chain head, export", true},
+    {"Payload",     "USB keyboard scripts from the card", true},
     {"Instruments", "Live power, radio, GNSS and tilt", true},
 };
 constexpr int kSurfaceCount = sizeof(kSurfaces) / sizeof(kSurfaces[0]);
@@ -94,8 +103,13 @@ void drawMenu() {
     std::snprintf(batt, sizeof(batt), "%d%%", M5.Power.getBatteryLevel());
     orthrus::ui::chrome("Surfaces", batt);
 
-    for (int i = 0; i < kSurfaceCount; i++) {
-        const int y   = kListTop + i * kRowH;
+    if (g_selected < g_scroll) g_scroll = g_selected;
+    if (g_selected >= g_scroll + kVisibleRows) g_scroll = g_selected - kVisibleRows + 1;
+
+    for (int row = 0; row < kVisibleRows; row++) {
+        const int i = g_scroll + row;
+        if (i >= kSurfaceCount) break;
+        const int y   = kListTop + row * kRowH;
         const int mid = y + kRowH / 2;
         const bool sel = (i == g_selected);
 
@@ -220,6 +234,13 @@ void openSurface(int index) {
     }
 
     if (index == 5) {
+        static orthrus::modules::Payload payload;
+        payload.begin();
+        payload.run();
+        return;
+    }
+
+    if (index == 6) {
         static orthrus::modules::Instruments instruments;
         instruments.begin();
         instruments.run();
@@ -247,6 +268,18 @@ void openSurface(int index) {
 }  // namespace
 
 void setup() {
+    // HID first, before anything else touches USB.
+    //
+    // A USB device's interfaces are fixed at enumeration. Registering the
+    // keyboard later -- when the operator opens the Payload screen -- is too
+    // late: the host has already decided this is a serial port only, and no
+    // keyboard ever appears. Measured, not assumed: doing it lazily produced a
+    // CDC with no HID interface at all.
+    //
+    // On builds without HID this is a no-op, so the default firmware is
+    // unchanged.
+    if (orthrus::hal::hidSupportedInBuild()) orthrus::hal::sharedHid().begin();
+
     auto cfg = M5.config();
     M5Cardputer.begin(cfg, true);
     M5Cardputer.Display.setRotation(1);

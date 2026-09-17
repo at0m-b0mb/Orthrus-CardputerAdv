@@ -1,0 +1,23 @@
+REM Harmless demonstration payload.
+REM
+REM It opens a text editor and types a notice. Nothing is executed, nothing is
+REM downloaded, nothing is changed. It exists so you can prove the HID path
+REM works against a machine you own before trusting it on an engagement.
+REM
+REM Copy this to /orthrus/payloads/ on the SD card. Nothing is shipped onto the
+REM card automatically: a payload should be one you have read.
+
+DEFAULTDELAY 20
+
+REM Give the host a moment after the device enumerates.
+DELAY 1500
+
+REM Windows: Run dialog. On macOS use GUI SPACE for Spotlight instead.
+GUI r
+DELAY 600
+STRINGLN notepad
+DELAY 1500
+
+STRINGLN Orthrus HID test.
+STRINGLN This machine accepted keystrokes from a device plugged into it.
+STRINGLN Nothing was executed and nothing was changed.
