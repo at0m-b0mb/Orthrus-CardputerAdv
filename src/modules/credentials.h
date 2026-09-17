@@ -14,6 +14,7 @@
 
 #include "credential/grade.h"
 #include "credential/tag.h"
+#include "hal/gnss.h"
 #include "hal/rfid2.h"
 
 namespace orthrus::modules {
@@ -36,6 +37,7 @@ private:
     void drawRoll();
     bool handleKeys();
     void runKeyProbe();
+    void logBadge(const credential::TagIdentity& t);
 
     // A small roll of what has been presented this session. A physical
     // engagement means walking past a lot of people; being able to look back at
@@ -50,6 +52,7 @@ private:
 
     int findInRoll(const credential::TagIdentity& t) const;
 
+    hal::Gnss& gnss_ = hal::sharedGnss();
     hal::Rfid2 reader_;
     const char* probeNote_ = nullptr;
     char        probeBuf_[64] = {0};

@@ -60,6 +60,8 @@ private:
     float    rssiNow_   = 0.0f;
 
     void sampleRssi();
+    void logDevice(const lorawan::DeviceRecord& rec,
+                   const lorawan::RxMeta& meta);
 
     hal::Gnss&        gnss_  = hal::sharedGnss();
     hal::LoraRadio&   radio_ = hal::sharedRadio();

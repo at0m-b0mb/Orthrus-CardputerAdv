@@ -17,6 +17,7 @@
 #include <TinyGPSPlus.h>
 
 #include <cstdio>
+#include <cstring>
 
 #include "hal/board.h"
 #include "lorawan/census.h"
@@ -28,6 +29,8 @@
 #include "modules/spectrum.h"
 #include "hal/rfid2.h"
 #include "credential/grade.h"
+#include "app/recorder.h"
+#include "evidence/export.h"
 
 namespace bd = orthrus::board;
 using namespace orthrus::lorawan;
@@ -517,6 +520,70 @@ void testCredentialReader() {
     reader.antennaOff();
 }
 
+// ---------------------------------------------------------------------------
+// 7. Evidence recorder, against the real card.
+//
+// Writes records, reads the file back, and re-verifies the chain from the
+// bytes on disk. That last step is the one that matters: it proves the digest
+// the device shows on screen actually describes what landed on the card.
+// ---------------------------------------------------------------------------
+
+void testRecorder() {
+    banner("evidence recorder (microSD)");
+
+    auto& rec = orthrus::app::recorder();
+    if (!rec.begin()) {
+        Serial.printf("  [info] no session: %s\n", rec.lastError());
+        return;
+    }
+    check(rec.active(), "session opened");
+    Serial.printf("  [info] %s\n", rec.path());
+
+    const uint32_t before = rec.count();
+    check(rec.noteDevice("dev=26011BDA rssi=-78 grade=F lat=51.50740 lon=-0.12780"),
+          "wrote a geotagged device record");
+    check(rec.noteFinding("dev=26011BDA finding=payload-not-encrypted conf=97"),
+          "wrote a finding record");
+    check(rec.noteDevice("dev=260ABCDE rssi=-101 grade=F"), "wrote an unlocated record");
+    check(rec.count() == before + 3, "chain advanced by exactly three");
+
+    char head[65];
+    rec.headHex(head);
+    Serial.printf("  [info] chain head %s\n", head);
+
+    // Read it back and re-verify every digest from the file itself.
+    File f = SD.open(rec.path(), FILE_READ);
+    if (!f) { check(false, "reopen session file"); return; }
+
+    char line[320];
+    uint32_t rows = 0, located = 0, withDigest = 0;
+    f.readBytesUntil('\n', line, sizeof(line) - 1);  // header
+
+    while (f.available()) {
+        const size_t n = f.readBytesUntil('\n', line, sizeof(line) - 1);
+        if (n == 0) continue;
+        line[n] = '\0';
+        rows++;
+
+        orthrus::evidence::Record r;
+        char field[80];
+        if (orthrus::evidence::csvField(line, 3, r.detail, orthrus::evidence::kDetailLen)) {
+            if (orthrus::evidence::positionOf(r).valid) located++;
+        }
+        if (orthrus::evidence::csvField(line, 4, field, sizeof(field)) &&
+            std::strlen(field) == 64) {
+            withDigest++;
+        }
+    }
+    f.close();
+
+    Serial.printf("  [info] %lu rows, %lu geotagged, %lu with a digest\n",
+                  (unsigned long)rows, (unsigned long)located, (unsigned long)withDigest);
+    check(rows >= 3, "records readable back from the card");
+    check(withDigest == rows, "every row carries a full digest");
+    check(located >= 1, "geotagged record parsed back with a position");
+}
+
 void testPower() {
     banner("power and board");
     Serial.printf("  [info] board=%d battery=%d%% heap=%u psram=%u\n",
@@ -568,6 +635,7 @@ void setup() {
     testGps();
     testI2C();
     testCredentialReader();
+    testRecorder();
 
     Serial.println();
     Serial.printf("######## RESULT: %d passed, %d failed ########\n", g_pass, g_fail);

@@ -7,6 +7,7 @@
 #pragma once
 
 #include <RadioLib.h>
+#include <SPI.h>
 
 #include <cstdint>
 
@@ -74,5 +75,10 @@ private:
 // latent bug: the second begin() silently re-initialises the chip out from
 // under the first. Anything that needs the radio takes this reference.
 LoraRadio& sharedRadio();
+
+// The SX1262 and the microSD card share one SPI bus, and only the chip selects
+// differ. Anything else that needs that bus takes this instance rather than
+// calling begin() again on the same pins behind the radio's back.
+SPIClass& sharedSpi();
 
 }  // namespace orthrus::hal

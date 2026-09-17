@@ -199,6 +199,8 @@ void LoraRadio::idle() {
     if (ready_) g_radio.standby();
 }
 
+SPIClass& sharedSpi() { return g_spi; }
+
 LoraRadio& sharedRadio() {
     static LoraRadio instance;
     return instance;

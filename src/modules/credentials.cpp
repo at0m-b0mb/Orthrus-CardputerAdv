@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "app/recorder.h"
 #include "app/theme.h"
 #include "app/ui.h"
 #include "credential/defaults.h"
@@ -100,7 +101,10 @@ void Credentials::poll() {
         selected_ = -1;
     }
 
-    if (existing < 0) probeNote_ = nullptr;  // a new badge, not the old result
+    if (existing < 0) {
+        probeNote_ = nullptr;  // a new badge, not the old result
+        logBadge(t);
+    }
     if (view_ == View::Waiting) view_ = View::Card;
 
     // Put the card to sleep so the next poll sees a genuinely new presentation
@@ -141,10 +145,36 @@ void Credentials::runKeyProbe() {
         std::snprintf(probeBuf_, sizeof(probeBuf_), "key %c: %s",
                       keyType == 0 ? 'A' : 'B', k.origin);
         probeNote_ = probeBuf_;
+
+        char uid[24];
+        uidToHex(t, uid, sizeof(uid));
+        char detail[96];
+        std::snprintf(detail, sizeof(detail),
+                      "uid=%s finding=default-key-accepted key=%c origin=%s", uid,
+                      keyType == 0 ? 'A' : 'B', k.origin);
+        app::recorder().noteFinding(detail);
     } else {
         probeNote_ = "no published key opened it";
     }
     view_ = View::Card;
+}
+
+void Credentials::logBadge(const cr::TagIdentity& t) {
+    auto& r = app::recorder();
+    if (!r.active()) return;
+
+    char uid[24];
+    uidToHex(t, uid, sizeof(uid));
+    const auto a = cr::assess(t);
+
+    char detail[96];
+    int n = std::snprintf(detail, sizeof(detail), "uid=%s family=%s grade=%s", uid,
+                          cr::familyName(t.family()), cr::gradeName(a.grade));
+    if (gnss_.hasFix() && n > 0 && n < static_cast<int>(sizeof(detail))) {
+        std::snprintf(detail + n, sizeof(detail) - n, " lat=%.5f lon=%.5f",
+                      gnss_.latitude(), gnss_.longitude());
+    }
+    r.noteDevice(detail);
 }
 
 void Credentials::drawWaiting() {

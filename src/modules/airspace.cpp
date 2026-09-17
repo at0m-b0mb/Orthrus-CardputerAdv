@@ -5,9 +5,11 @@
 #include <cstdio>
 #include <cstring>
 
+#include "app/recorder.h"
 #include "app/theme.h"
 #include "app/ui.h"
 #include "hal/board.h"
+#include "lorawan/findings.h"
 #include "lorawan/phy.h"
 
 namespace orthrus::modules {
@@ -109,6 +111,36 @@ lw::CaptureContext Airspace::context() const {
     return c;
 }
 
+void Airspace::logDevice(const lw::DeviceRecord& rec, const lw::RxMeta& meta) {
+    auto& r = app::recorder();
+    if (!r.active()) return;
+
+    char label[20];
+    if (rec.kind == lw::DeviceKind::Session) {
+        std::snprintf(label, sizeof(label), "%08lX",
+                      static_cast<unsigned long>(rec.devAddr));
+    } else {
+        std::snprintf(label, sizeof(label), "%02X%02X%02X%02X", rec.devEui[4],
+                      rec.devEui[5], rec.devEui[6], rec.devEui[7]);
+    }
+
+    const auto a = lw::assess(rec, context());
+
+    char detail[96];
+    int n = std::snprintf(detail, sizeof(detail),
+                          "dev=%s rssi=%d sf=%u grade=%s", label,
+                          static_cast<int>(meta.rssiDbm),
+                          static_cast<unsigned>(meta.sf), lw::gradeName(a.grade));
+
+    // Position only when there is a real fix. A sighting without one is still
+    // worth logging; it simply cannot be placed on a map.
+    if (gnss_.hasFix() && n > 0 && n < static_cast<int>(sizeof(detail))) {
+        std::snprintf(detail + n, sizeof(detail) - n, " lat=%.5f lon=%.5f",
+                      gnss_.latitude(), gnss_.longitude());
+    }
+    r.noteDevice(detail);
+}
+
 void Airspace::sampleRssi() {
     if (millis() - lastRssiMs_ < 60) return;
     lastRssiMs_ = millis();
@@ -137,8 +169,13 @@ void Airspace::pump() {
     if (len > 0) {
         lw::Frame f;
         if (lw::parse(phy, static_cast<size_t>(len), f)) {
-            census_.observe(f, meta);
+            const size_t before = census_.size();
+            const int idx = census_.observe(f, meta);
             lastFrameMs_ = millis();
+
+            // Log the first sighting only. Every uplink from a chatty sensor
+            // would otherwise fill the card with the same line.
+            if (idx >= 0 && census_.size() > before) logDevice(census_.at(static_cast<size_t>(idx)), meta);
 
             if (f.mtype == lw::MType::JoinRequest) {
                 std::snprintf(lastLine_, sizeof(lastLine_), "JOIN %02X%02X%02X%02X %ddBm",

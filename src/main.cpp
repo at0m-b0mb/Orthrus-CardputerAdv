@@ -12,6 +12,7 @@
 #include "hal/board.h"
 #include "modules/airspace.h"
 #include "modules/credentials.h"
+#include "modules/engagement.h"
 #include "modules/instruments.h"
 
 using namespace orthrus::theme;
@@ -48,7 +49,7 @@ const Surface kSurfaces[] = {
     {"Perimeter",   "Wi-Fi recon and captive portals", false},
     {"Credentials", "13.56 MHz badge identify and grade", true},
     {"Control",     "Infrared and USB payloads",       false},
-    {"Engagement",  "Scope, evidence log, export",     false},
+    {"Engagement",  "Evidence log, chain head, export", true},
     {"Instruments", "Live power, radio, GNSS and tilt", true},
 };
 constexpr int kSurfaceCount = sizeof(kSurfaces) / sizeof(kSurfaces[0]);
@@ -199,6 +200,13 @@ void openSurface(int index) {
             return;
         }
         airspace.run();
+        return;
+    }
+
+    if (index == 4) {
+        static orthrus::modules::Engagement engagement;
+        engagement.begin();
+        engagement.run();
         return;
     }
 
