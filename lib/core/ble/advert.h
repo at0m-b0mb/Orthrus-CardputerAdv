@@ -57,6 +57,11 @@ inline constexpr uint8_t kAppleNearby       = 0x10;
 inline constexpr uint8_t kAppleFindMy       = 0x12;
 inline constexpr uint8_t kAppleProximityPair = 0x07;
 
+// Microsoft's beacon identifier, from the published Swift Pair work. 0x03 is
+// the one that solicits pairing; it sits in the first byte of manufacturer
+// data, where Apple keeps its subtype.
+inline constexpr uint8_t kMicrosoftBeaconSwiftPair = 0x03;
+
 struct Advert {
     char     name[kNameBuf] = {0};
     bool     hasName        = false;
@@ -70,6 +75,16 @@ struct Advert {
     // a pair of earbuds, and both are company 0x004C.
     uint8_t appleType = 0;
     uint8_t appleLen  = 0;
+
+    // The first byte of manufacturer data after the company identifier, for
+    // any vendor. Apple's copy of it is appleType above; Microsoft puts its
+    // beacon identifier here, which is what separates a Swift Pair
+    // solicitation from every other thing a Windows machine advertises.
+    //
+    // One byte, copied, rather than a pointer into the scan buffer: an Advert
+    // is kept in a table that outlives the callback it was parsed in.
+    uint8_t mfgFirst      = 0;
+    bool    hasMfgPayload = false;
 
     uint16_t services[kMaxServices] = {0};
     uint8_t  serviceCount = 0;
@@ -120,6 +135,7 @@ enum class Kind : uint8_t {
     TileTracker,
     SamsungTag,
     FastPair,       // a Google Fast Pair accessory advertising for pairing
+    SwiftPair,      // a Microsoft Swift Pair solicitation
     IBeacon,
     Eddystone,
 };

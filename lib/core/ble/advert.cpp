@@ -127,6 +127,10 @@ bool parseAdvert(const uint8_t* data, size_t len, Advert& out) {
                 if (plen >= 2) {
                     out.companyId  = le16(payload);
                     out.hasCompany = true;
+                    if (plen >= 3) {
+                        out.mfgFirst      = payload[2];
+                        out.hasMfgPayload = true;
+                    }
                     // Apple puts a subtype and a length in front of its payload.
                     // It is what separates a luggage tag from earbuds, and both
                     // are company 0x004C.
@@ -205,6 +209,15 @@ Kind classify(const Advert& a) {
     if (a.hasService(kServiceEddystone)) return Kind::Eddystone;
     if (a.hasService(kServiceFastPair)) return Kind::FastPair;
 
+    // Microsoft's beacon identifier 0x03 in the first manufacturer-data byte is
+    // the Swift Pair solicitation -- the one that raises a pairing notification
+    // on a Windows machine. A registry-assigned company plus a published
+    // protocol field, which is the only kind of evidence this file acts on: a
+    // Windows laptop advertising anything else under 0x0006 is not this.
+    if (a.hasCompany && a.companyId == kCompanyMicrosoft && a.hasMfgPayload &&
+        a.mfgFirst == kMicrosoftBeaconSwiftPair)
+        return Kind::SwiftPair;
+
     if (a.hasCompany && a.companyId == kCompanyApple) {
         // iBeacon is checked by its length as well as its type: 0x02 with any
         // other length is not an iBeacon frame and should not be read as one.
@@ -225,6 +238,7 @@ const char* kindName(Kind k) {
         case Kind::TileTracker: return "Tile";
         case Kind::SamsungTag:  return "SmartTag";
         case Kind::FastPair:    return "Fast Pair";
+        case Kind::SwiftPair:   return "Swift Pair";
         case Kind::IBeacon:     return "iBeacon";
         case Kind::Eddystone:   return "Eddystone";
     }
@@ -252,6 +266,10 @@ const char* kindDetail(Kind k) {
         case Kind::FastPair:
             return "A Google Fast Pair accessory advertising to be paired, which "
                    "usually means headphones in pairing mode.";
+        case Kind::SwiftPair:
+            return "A Microsoft Swift Pair solicitation: a device asking to be "
+                   "paired, which raises a notification on Windows machines in "
+                   "range. Also what advertisement spam looks like.";
         case Kind::IBeacon:
             return "A fixed iBeacon: a shop, a museum, a car park. It broadcasts "
                    "a position, it does not record yours.";
