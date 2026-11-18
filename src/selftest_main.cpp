@@ -31,6 +31,12 @@
 #include "credential/grade.h"
 #include "app/recorder.h"
 #include "evidence/export.h"
+#include "attack/family.h"
+#include "dot11/inject.h"
+#include "ble/emulate.h"
+#include "hal/rawtx.h"
+#include <WiFi.h>
+#include <esp_wifi.h>
 
 namespace bd = orthrus::board;
 using namespace orthrus::lorawan;
@@ -53,6 +59,135 @@ void check(bool ok, const char* what) {
 void banner(const char* s) {
     Serial.println();
     Serial.printf("== %s ==\n", s);
+}
+
+// ---------------------------------------------------------------------------
+// 0. The transmit path, which is the one thing host tests cannot reach.
+//
+// The host suite proves every frame and every advertisement byte by byte, and
+// CI proves our sanity-check override is the symbol that linked. Neither can
+// answer the question that actually decides whether the Attack surface works:
+// does THIS radio, with that override in place, accept the frames we build?
+//
+// It has already been wrong once. The link used --wrap, which cannot rewrite a
+// call libnet80211 makes to itself, ld said nothing, and every transmit was
+// rejected with "unsupport frame type" while the screen counted up to zero
+// frames sent and reported "no effect seen" -- indistinguishable from a
+// properly protected network.
+//
+// WHAT THIS PUTS ON THE AIR, AND WHAT IT DELIBERATELY DOES NOT
+//
+// One beacon shape, carrying an ORTHRUS- prefixed name and an invented
+// locally-administered BSSID, on channel 1. It denies nothing, disconnects
+// nobody, and wears nobody's name. A self-test runs unattended with no
+// authorisation and no target, so nothing disruptive belongs in it: no deauth,
+// no disassociation, no flood, no channel switch. Those need an operator, a
+// target they chose and a key held down, and that is the whole point of the
+// gate in lib/core/attack.
+void testRawTransmit() {
+    banner("Raw 802.11 transmit");
+
+    namespace atk = orthrus::attack;
+    namespace d11 = orthrus::dot11;
+
+    // --- the gate, on target rather than on a laptop ------------------------
+    //
+    // Engine parity for the newest core. The same three invariants the host
+    // suite asserts, re-asserted in the ESP32 build.
+    atk::Authorization none;
+    atk::Plan plan;
+    atk::planDefault(plan, atk::Family::BleFindMy);
+    check(atk::validate(plan, none, millis()) == atk::PlanError::NotAuthorized,
+          "a Bluetooth family refuses without an authorisation on target");
+
+    atk::planDefault(plan, atk::Family::Deauth);
+    check(atk::validate(plan, none, millis()) == atk::PlanError::NotAuthorized,
+          "a Wi-Fi family refuses without an authorisation on target");
+
+    const uint8_t ap[6] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
+    const uint8_t bcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    atk::Authorization auth;
+    check(atk::lock(auth, "ORTHRUS-SELFTEST", ap, 1, millis(), 60000),
+          "an authorisation locks onto one access point");
+    check(!atk::lock(auth, "x", bcast, 1, millis(), 60000),
+          "a broadcast BSSID is refused as a target");
+
+    // Re-lock: the refused attempt above cleared nothing, but be explicit.
+    atk::lock(auth, "ORTHRUS-SELFTEST", ap, 1, millis(), 60000);
+    uint8_t dest[6];
+    atk::destinationFor(auth, dest);
+    check(std::memcmp(dest, bcast, 6) == 0, "whole-cell scope resolves to broadcast");
+    const uint8_t sta[6] = {0x06, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE};
+    atk::lockClient(auth, sta);
+    atk::destinationFor(auth, dest);
+    check(std::memcmp(dest, sta, 6) == 0,
+          "naming a client narrows the destination, on target too");
+
+    // --- the override -------------------------------------------------------
+    const bool overrideLinked = orthrus::hal::rawTxAvailable();
+    check(overrideLinked, "our frame-sanity override is the one that linked");
+    if (!overrideLinked) {
+        Serial.println("  [info] raw transmit is impossible in this build; "
+                       "skipping the on-air test");
+        return;
+    }
+
+    // --- the builders, in the ESP32 build ----------------------------------
+    d11::Sequencer seq;
+    uint8_t bssid[6];
+    d11::inventedAddress(bssid, 1);
+    check(d11::addressIsInvented(bssid),
+          "an invented BSSID was never assigned to anybody");
+
+    uint8_t frame[d11::kInjectMax];
+    const size_t len = d11::buildBeacon(frame, sizeof(frame),
+                                        ORTHRUS_TEST_PREFIX "SELFTEST", bssid, 1,
+                                        d11::BeaconSecurity::Wpa2Psk, seq);
+    check(len > 24, "a beacon builds on target");
+    check(atk::labelOk(ORTHRUS_TEST_PREFIX "SELFTEST"),
+          "the name it carries is marked as a test rig");
+
+    // And a Bluetooth payload, built but NOT advertised: putting a vendor's own
+    // identifiers on the air is an operator's decision, never a self-test's.
+    uint8_t advert[orthrus::ble::kAdvertMax];
+    const size_t alen = orthrus::ble::buildEmulation(orthrus::ble::Emulation::FindMy,
+                                                     advert, sizeof(advert), 1);
+    check(alen == 31, "a Find My advert fills the payload exactly on target");
+
+    // --- the radio ----------------------------------------------------------
+    if (!orthrus::hal::rawTxBegin(1)) {
+        check(false, "radio came up for transmission");
+        return;
+    }
+    check(true, "radio came up for transmission");
+
+    uint32_t accepted = 0;
+    constexpr uint32_t kTries = 20;
+    for (uint32_t i = 0; i < kTries; i++) {
+        if (orthrus::hal::rawTxSend(frame, len)) accepted++;
+        delay(5);
+    }
+    Serial.printf("  [info] %u of %u beacons accepted by the driver\n",
+                  static_cast<unsigned>(accepted), static_cast<unsigned>(kTries));
+
+    // THE assertion. Anything less than all of them means the override is not
+    // doing its job, and a partial pass is the symptom that hid this before.
+    check(accepted == kTries, "the driver accepted every frame we built");
+
+    // Accepted is not received. Nothing here can tell whether anybody heard it,
+    // and the surfaces say so rather than claiming otherwise.
+    Serial.println("  [info] accepted != received: the driver took them, which "
+                   "is all this can prove");
+
+    // Refusing a channel outside the domain is checked at the point of tuning,
+    // not only in the plan.
+    atk::regionSet(atk::Region::Fcc);
+    check(!orthrus::hal::rawTxSetChannel(13),
+          "channel 13 is refused under FCC at the point of tuning");
+    check(orthrus::hal::rawTxSetChannel(6), "channel 6 is permitted under FCC");
+
+    orthrus::hal::rawTxEnd();
+    WiFi.mode(WIFI_OFF);
 }
 
 // ---------------------------------------------------------------------------
@@ -694,6 +829,7 @@ void setup() {
 
     testPower();
     testEngineParity();
+    testRawTransmit();
     // Before the radio, deliberately: see the note on the test itself.
     testSdWithoutRadio();
     testRadioBringUp();

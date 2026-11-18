@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/at0m-b0mb/Orthrus-CardputerAdv/actions/workflows/ci.yml"><img src="https://github.com/at0m-b0mb/Orthrus-CardputerAdv/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/host%20tests-325%20passing-6FA86B" alt="325 host tests">
+  <img src="https://img.shields.io/badge/host%20tests-436%20passing-6FA86B" alt="436 host tests">
   <img src="https://img.shields.io/badge/on--device%20tests-52%20passing-6FA86B" alt="52 on-device tests">
   <img src="https://img.shields.io/badge/platform-Cardputer--Adv-B8893B" alt="Cardputer-Adv">
   <img src="https://img.shields.io/badge/licence-MIT-8A857C" alt="MIT">
@@ -357,6 +357,97 @@ all of which beat the scan API's single "encryption type" number.
 
 ---
 
+## Attack — nine ways to transmit at one network
+
+Deauth answers one question well. There are eight more questions that need the
+radio, and they all share the same shape: pick a target, pick what to do to it,
+read what that does to the people on it, arm it deliberately, watch it run, read
+what was actually observed. So they are one surface rather than nine, driven by
+a family table in `lib/core/attack/` that is pure and host-tested.
+
+| Family | What it is for | Class |
+| --- | --- | --- |
+| **Deauth** | Are forged disconnects accepted — is 802.11w really protecting this? | disruptive |
+| **Disassoc** | The same question by the other frame; some stacks honour one and ignore the other | disruptive |
+| **Auth flood** | Can the association table be filled by a stranger until real clients cannot get in? | disruptive |
+| **Assoc flood** | The same, one step further into the handshake | disruptive |
+| **Channel switch** | Do clients obey an unauthenticated instruction to move channel, and so get walked off their own network? | disruptive |
+| **PMKID** | Does this access point hand crackable key material to anyone who asks, with no client involved? | active |
+| **Twin beacon** | Can this network's clients tell the real access point from one shouting the same name? | active |
+| **Karma** | Which networks are the devices in this room still looking for — and will any accept an answer from a stranger? | active |
+| **Beacons** | Does anything here notice access points that were not there a minute ago? | benign |
+
+### The gate, and the three defects it exists to make impossible
+
+Every one of these goes through one check in `lib/core/attack/family.h`. All
+three of the following were real, found on this author's own hardware in
+Basanos, and each now has a host test named after it — because an invariant with
+no test is a comment.
+
+**The authorisation check used to sit inside the "does this family need a
+target" branch.** So every family with `needsTarget` false — which is every
+Bluetooth one — transmitted with no authorisation ever consulted. The families
+that need no target are exactly the ones that *look* like they need no
+permission. The check is now unconditional and runs first, and a test walks all
+sixteen families asserting each refuses when nothing is locked.
+
+**"Whole cell" and "one named client" used to be two independent flags,** and
+the destination resolver preferred whole-cell. Naming a client therefore left
+the radio broadcasting at everybody while every screen reported a narrowed
+scope. Scope is now *derived* from one field, so the two cannot disagree, and a
+group address cannot be named as a client at all.
+
+**A refused run still reached the scoring path,** which read an uninitialised
+frame count and reported a burst the radio never sent. A refused plan is now
+left untouched rather than half-clamped, and the frame budget clamps rather than
+trusting a plan nobody validated.
+
+### What the arming screen leads with
+
+Not the frame count, the rate or the channel. Those are all true and none of
+them say that everybody in the building is about to drop off the Wi-Fi. Every
+family carries an `effect` written for the person with a finger on the key — and
+the table has no row without one, asserted by a test.
+
+Then the key is **held for two seconds, not tapped.** A slip of the thumb should
+not deauthenticate a floor.
+
+### What it will not do
+
+**No all-networks mode.** One target, chosen by hand, named in the engagement
+log. Anything else is interference with neighbours who did not agree to it.
+
+**No captive portal and no credential prompt.** Karma answers probes and logs
+who asked for what; it never asks anybody for a password. That is the one
+exclusion here that has never moved — and it is why Karma is included at all:
+the finding is "your devices still trust this name", which needs no harvesting
+to establish.
+
+**Nothing invented wears a real name.** Every SSID this device makes up carries
+the `ORTHRUS-` prefix, so anybody else sniffing the room sees a test rig rather
+than an attack. The two exceptions — Twin beacon and Karma — exist precisely to
+carry somebody else's name, and `attack::familyMayImpersonate` says so by name
+rather than leaving it implicit.
+
+**It will not transmit outside your regulatory domain by accident.** The clamp
+starts at the narrowest 2.4 GHz plan (FCC, 1–11). A locked target can widen it,
+because an access point on channel 13 is not operating under a plan that stops
+at 11 — and the operator is told every time it happens, because it is their call
+to make knowingly.
+
+### And it stops on its own
+
+Rate and duration ceilings come from the family, and a plan may lower them and
+never raise them. A run marked "until stopped" is still bounded: the
+authorisation is re-checked **before every burst**, and its TTL is capped at four
+hours. "Until I stop it" cannot become "until the battery dies in a drawer".
+
+Every run writes one line into the engagement log with the family, the target,
+the scope, the frames sent, the frames the driver refused, and what was observed
+afterwards.
+
+---
+
 ## Clients — who is actually here
 
 A network scan tells you which access points exist. It says nothing about
@@ -484,6 +575,86 @@ pretending otherwise would be a lie.
 
 ---
 
+## Emulate — advertising as a real product
+
+Every tracker detector, device-spam alarm and asset-tracking app classifies by a
+manufacturer company identifier or a service UUID. It has to: a name is a string
+somebody typed, and half the trackers in the world are called "iPhone".
+
+Which means testing one of those detectors has exactly one honest method. An
+advertisement built from the Bluetooth SIG's reserved test identifier will be
+**correctly ignored** — a detector keying on Apple's `0x004C` is supposed to
+ignore `0xFFFF` — so a test that passes because the detector ignored it has
+established nothing at all. Proving a detector recognises a tracker means putting
+a tracker's own bytes on the air.
+
+So these seven carry the vendors' real identifiers, and that is the single
+deliberate exception to the `ORTHRUS-` prefix rule in this firmware. It is
+stated in `lib/core/ble/emulate.h`, in `attack::familyMayImpersonate`, and here,
+rather than being quietly true.
+
+| Family | Identified by | Who notices |
+| --- | --- | --- |
+| **Find My** | Apple `0x004C`, subtype `0x12` | Nearby iPhones may relay it. Owners see nothing. |
+| **Tile** | service `0xFEED` *or* `0xFEEC` | Detectors and the Tile app |
+| **SmartTag** | service `0xFD5A` | Nearby Galaxy phones may relay it |
+| **Flipper** | its advertised name, and nothing else | Apps that hunt for Flippers |
+| **Fast Pair** | Google service `0xFE2C` | **A pairing dialog appears on Android phones in range** |
+| **Swift Pair** | Microsoft `0x0006`, beacon id `0x03` | **A pairing notification appears on Windows machines in range** |
+| **Swarm** | many identities at once | Fills nearby Bluetooth lists |
+
+### The two that interrupt a person
+
+Four of these are observational: a phone relays or ignores them and shows its
+owner nothing. Fast Pair and Swift Pair are pairing solicitations, and in a
+shared building that means a dialog in front of a stranger who did not ask.
+
+That difference is not a footnote. It is a field in the family table, it is the
+mark on every row of the picker — `dialog` in red against `quiet` — it leads the
+arming screen, and those two carry a fraction of the others' rate and duration
+ceilings. And the **Swarm rotation cannot reach them**: the rotation table in
+`lib/core/ble/emulate.cpp` excludes them, so asking for forty pairing dialogs by
+mistake is not possible. The guard is the code, not a note in a manual.
+
+### Tile ships two UUIDs, and that is the point of being able to emit both
+
+A detector that knows only the older `0xFEED` files a modern Tile as a generic
+device. That is a false negative in the one place false negatives matter, and
+demonstrating it needs a device that can advertise either one.
+
+### Every builder is round-tripped through this firmware's own classifier
+
+The host tests assert that each emulation, parsed back by Orthrus's own
+`parseAdvert` and `classify`, comes out as the product it set out to be. An
+emulation its own detector cannot name is either a broken builder or a broken
+classifier, and either way the operator would be told a tracker was on the air
+when nothing recognisable was.
+
+One of those tests caught a real defect before any of it ran: an overlong Swift
+Pair display name was being clamped against a local buffer rather than against
+what was left in the 31-byte packet, so the structure was refused and the
+builder returned zero. A long name would have produced **nothing on the air**
+while the screen reported an armed emulation.
+
+### The ceiling, said on the result screen every time
+
+This proves what a detector does with these bytes. It does not prove a real
+AirTag would behave identically — a real one rotates a resolvable key on a
+schedule, answers Apple's cryptography, and is attached to something. Nothing
+here is a tracker. It is a tracker's *advertisement*, which is a smaller and
+checkable claim.
+
+A company identifier for the Flipper emulation was written from memory rather
+than from the registry, and then removed. That is the mistake that puts a real
+brand's name against the wrong OUI and has everyone who reads the capture
+afterwards believe it. An identifier that cannot be checked does not go on the
+air, so that emulation carries a name and a transmit power — which is also the
+honest shape, since the name is the whole tell. Orthrus's own Devices surface
+will therefore list it as a generic device called "Flipper Orthrus", and that is
+the right answer.
+
+---
+
 ## Evidence integrity
 
 A capture that ends as an editable CSV is an anecdote. Orthrus links every
@@ -579,7 +750,7 @@ pio run -t upload
 | `;` `.` `,` `/` | Move — all four on the category grid, up/down in a list |
 | `enter` | Open / continue |
 | `` ` `` | Back |
-| `a` | Arm (Deauth, Clone, BadUSB) · active scan (Devices) |
+| `a` | Arm (Deauth, Clone, BadUSB) · **hold 2 s** to arm (Attack, Emulate) · active scan (Devices) |
 | `l` | Lock to this channel (Handshakes, Clients) |
 | `s` | Save the capture (Handshakes) · step spreading factor (LoRa) |
 | `k` | Sweep every sector (Test Keys) |
@@ -604,7 +775,7 @@ Anything that decides whether a finding is true lives in `lib/core`, builds on
 the host, and is covered by tests. The firmware is glue around it.
 
 ```bash
-pio test -e native            # 325 host tests, no board required
+pio test -e native            # 436 host tests, no board required
 pio run -e selftest -t upload # 35 checks on the real device
 ```
 
@@ -635,7 +806,9 @@ Sanitizer — 3,000,000 hostile frames, zero findings — and that runs in CI.
 ```
 lib/core/lorawan/    parser, census, grader, channel plans   <- host-tested
 lib/core/dot11/      802.11 frames, RSN, EAPOL, stations, pcap  <- host-tested
-lib/core/ble/        BLE advert parsing and classification    <- host-tested
+                     and the frame BUILDERS for transmitting    <- host-tested
+lib/core/ble/        BLE advert parsing, classification, emulation <- host-tested
+lib/core/attack/     the family table and the transmit gate    <- host-tested
 lib/core/credential/ badge identification and grading         <- host-tested
 lib/core/wifi/       network identification and grading       <- host-tested
 lib/core/geo/        position formatting and error estimates  <- host-tested
@@ -643,10 +816,11 @@ lib/core/ir/         infrared encoders AND a tolerant decoder <- host-tested
 lib/core/ducky/      HID keymap and DuckyScript parser        <- host-tested
 lib/core/crypto/     SHA-256, checked against the NIST vectors
 lib/core/evidence/   tamper-evident hash chain
-src/hal/             board pins, SX1262 receive path, WS1850S reader
+src/hal/             board pins, SX1262 receive path, WS1850S reader,
+                     and the one raw-802.11-transmit override
 src/app/             design tokens, drawing, category glyphs
 src/modules/         one file per surface
-test/native/         325 tests, no hardware needed
+test/native/         436 tests, no hardware needed
 tools/               screendump, mockup renderer, brand generator
 ```
 
@@ -660,8 +834,10 @@ tools/               screendump, mockup renderer, brand generator
 | Wi-Fi | **Handshakes** — capture WPA handshakes to crack later | Working |
 | Wi-Fi | **Clients** — see devices and the networks they seek | Working |
 | Wi-Fi | **Deauth** — test if clients can be forced off (802.11w) | Working |
+| Wi-Fi | **Attack** — nine ways to transmit at one network | Working |
 | Bluetooth | **Devices** — find BLE devices and hidden trackers | Working |
 | Bluetooth | **Services** — connect and list what a device exposes | Working |
+| Bluetooth | **Emulate** — advertise as a real product, test detectors | Working |
 | NFC | **Read Card** — identify a badge and grade its exposure | Working |
 | RFID | **Test Keys** — try every published key on every sector | Working |
 | RFID | **Clone** — copy a card onto a blank you own | Working |
@@ -675,7 +851,7 @@ tools/               screendump, mockup renderer, brand generator
 | System | **Diagnostics** — battery, radio, GPS and sensors, live | Working |
 | System | **Files** — browse what is on the microSD card | Working |
 
-All eighteen are built. Learn is the only one needing hardware beyond the board
+All twenty are built. Learn is the only one needing hardware beyond the board
 itself: an M5Stack Unit IR on the Grove port.
 
 The menu is two levels: nine category tiles that fit on one screen with no
@@ -685,26 +861,87 @@ that is the first choice.
 
 **Not yet proven:** the receive front end is confirmed alive and confirmed to
 retune, but decoding real over-the-air LoRaWAN has not been demonstrated yet —
-that needs live traffic to listen to. Said here rather than left for you to
-discover.
+that needs live traffic to listen to.
+
+### Attack and Emulate: what is proven, and what is not
+
+Proven on the board, by `pio run -e selftest -t upload` on 2026-11-17:
+
+- the frame-sanity override is the symbol that linked, asked at runtime rather
+  than assumed;
+- the radio **accepted 20 of 20** beacons built by `lib/core/dot11/inject.cpp`
+  — which is the question `nm` and CI cannot answer, and the one that was
+  silently wrong before;
+- the gate refuses an unauthorised plan in the ESP32 build, for a Bluetooth
+  family as well as a Wi-Fi one;
+- a broadcast BSSID is refused as a target, and naming a client narrows the
+  destination;
+- channel 13 is refused under FCC **at the point of tuning**, not only in the
+  plan.
+
+Not proven, and worth being plain about:
+
+- **Nothing has been run against a real network or a real detector.** What a
+  client stack does with a forged disconnect, whether an access point
+  volunteers a PMKID, whether a phone raises a Fast Pair dialog — those are
+  questions only the other end answers, and this firmware has not asked them
+  yet.
+- "The driver accepted it" is not "somebody received it". The result screens
+  say so, and so does this.
+- The self-test deliberately puts only one benign shape on the air: an
+  `ORTHRUS-` prefixed beacon from an invented address. It never transmits a
+  disconnect, a flood or a vendor's identifiers, because it runs unattended
+  with no authorisation and no target.
+
+The two failing self-test cases on this board are the SX1262 (`begin() = -2`,
+cap not seated) and GPS (0 bytes, it rides that cap). 46 of 46 checks that the
+attached hardware can answer pass.
 
 ---
 
 ## What this deliberately does not do
 
-**No deauthentication, jamming, or RF/BLE flooding.** Not an oversight — a
-decision, for three reasons. It is denial of service rather than assessment. It
-is the single feature that gets devices like this pulled from sale and their
-sellers into regulatory trouble. And it is unnecessary: Harvest catches
-handshakes from clients joining on their own, and PMKID capture needs no client
-at all.
+**This section used to begin "no deauthentication, jamming, or RF/BLE
+flooding".** That was true when it was written, stopped being true when the
+802.11w test shipped, and is now wrong in nine more ways. It is corrected here
+rather than quietly deleted, because a README that was once wrong about what the
+firmware does is worth knowing about.
+
+What actually held, and still holds, is the reasoning underneath it: **denial of
+service is not a finding.** So nothing here is a button that knocks things over.
+Every disruptive family exists to answer a question that cannot be answered any
+other way — are forged disconnects accepted, can the association table be
+filled, will clients obey an unauthenticated channel switch — and every one of
+them is wrapped in the gate described under **Attack**: one target chosen by
+hand, an authorisation with a capped lifetime re-checked before every burst,
+rate and duration ceilings a plan may lower and never raise, a regulatory clamp
+that starts at its narrowest, a two-second hold to arm, and a result screen that
+reports what was *observed* rather than what was sent.
+
+**No jamming.** Still absent, and this one is not a scoping decision that might
+move later. Jamming is broadband interference with no target and no finding; it
+is the thing that gets devices like this pulled from sale, and there is no
+assessment question it answers. Every family here is a structured frame
+addressed to one network.
+
+**No captive portal, no credential prompt, no credential harvesting.** Karma
+answers probe requests and logs who asked for what. It never asks anybody for a
+password, and there is no page to serve one from. That exclusion has never
+moved.
 
 **No key recovery against Crypto1.** Keys tries the published dictionary and
 stops. No nested, darkside or hardnested attack. If a sector does not open with
 a key anyone can look up, the finding is that we could not open it.
 
-**No passphrase cracking on the device.** Harvest exports a hashcat file. A
-handheld pretending to crack WPA would be pretending.
+**No passphrase cracking on the device.** Handshakes and PMKID both export a
+hashcat file and stop there. A handheld pretending to crack WPA would be
+pretending.
+
+**No WPS PIN recovery or Pixie Dust.** Present in Basanos, deliberately not
+ported yet: it needs ESP-IDF internal WPS state the Arduino framework does not
+expose the same way, and a half-working version of that attack crashes
+mid-assessment rather than failing cleanly. Named here so its absence is a
+decision you can see rather than a gap you discover.
 
 ---
 

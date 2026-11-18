@@ -28,6 +28,7 @@
 #include "modules/sys_evidence.h"
 #include "modules/sys_files.h"
 #include "modules/wifi_clients.h"
+#include "modules/wifi_attack.h"
 #include "modules/wifi_deauth.h"
 #include "modules/wifi_handshakes.h"
 #include "modules/sys_diagnostics.h"
@@ -37,6 +38,7 @@
 #include "modules/wifi_networks.h"
 #include "modules/gps_location.h"
 #include "modules/ble_devices.h"
+#include "modules/ble_emulate.h"
 #include "modules/ble_services.h"
 
 using namespace orthrus::theme;
@@ -45,7 +47,7 @@ namespace ic = orthrus::icons;
 
 namespace {
 
-constexpr char kVersion[] = "1.1.0";
+constexpr char kVersion[] = "1.2.0";
 
 // The Cardputer's printed arrow keys.
 constexpr char kKeyUp    = ';';
@@ -63,7 +65,9 @@ enum class Tool : uint8_t {
     WifiHandshakes,
     WifiClients,
     WifiDeauth,
+    WifiAttack,
     BleDevices,
+    BleEmulate,
     BleServices,
     NfcReadCard,
     RfidTestKeys,
@@ -107,11 +111,13 @@ const ToolEntry kWifiTools[] = {
     {Tool::WifiHandshakes, "Handshakes", "Capture WPA handshakes to crack later", true},
     {Tool::WifiClients,    "Clients",    "See devices and the networks they seek", true},
     {Tool::WifiDeauth,     "Deauth",     "Test if clients can be forced off (802.11w)", true},
+    {Tool::WifiAttack,     "Attack",     "Nine ways to transmit at one network", true},
 };
 
 const ToolEntry kBluetoothTools[] = {
     {Tool::BleDevices,  "Devices",  "Find BLE devices and hidden trackers", true},
     {Tool::BleServices, "Services", "Connect and list what a device exposes", true},
+    {Tool::BleEmulate,  "Emulate",  "Advertise as a real product, test detectors", true},
 };
 
 const ToolEntry kNfcTools[] = {
@@ -410,6 +416,27 @@ void openTool(const ToolEntry& entry) {
                 return;
             }
             clients.run();
+            return;
+        }
+
+        case Tool::WifiAttack: {
+            // Static: the network table plus the capture target is several KB,
+            // and the loop task's stack is 8 KB.
+            static orthrus::modules::WifiAttack attack;
+            attack.begin();
+            attack.run();
+            return;
+        }
+
+        case Tool::BleEmulate: {
+            static orthrus::modules::BleEmulate emulate;
+            if (!emulate.begin()) {
+                failure("Emulate", "Bluetooth did not start.",
+                        "The BLE stack refused to come up.",
+                        "Power cycle and try again.");
+                return;
+            }
+            emulate.run();
             return;
         }
 

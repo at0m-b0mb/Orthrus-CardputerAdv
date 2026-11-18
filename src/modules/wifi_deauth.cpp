@@ -11,55 +11,16 @@
 #include "app/theme.h"
 #include "app/ui.h"
 #include "hal/board.h"
-
-// The ESP-IDF refuses to transmit a forged management frame through
-// esp_wifi_80211_tx: ieee80211_raw_frame_sanity_check rejects it. Testing
-// whether a network accepts forged management frames is the entire point of
-// 802.11w, so that check has to be overridden to run the test at all.
-//
-// THIS WAS --wrap FIRST, AND --wrap DOES NOT WORK HERE
-//
-// The reasoning for it was good: redirect exactly one call, rather than reach
-// for -Wl,-zmuldefs and disable duplicate-symbol detection across the whole
-// link. The result was still wrong. libnet80211 both DEFINES and CALLS this
-// function inside a single object file, so the call is an intra-object
-// relocation that no linker can rewrite -- and ld says nothing at all when a
-// --wrap matches nothing. The build was green and every single transmit failed
-// with "unsupport frame type". Confirmed with nm on the linked ELF:
-// __wrap_ieee80211_raw_frame_sanity_check was not in the binary.
-//
-// So it is a plain strong redefinition plus --allow-multiple-definition, which
-// is what Basanos arrived at after hitting the same wall on real hardware.
-//
-// AND IT PROVES ITSELF AT RUNTIME
-//
-// A link-time trick that silently stops working is exactly how this surface
-// came to report "0 frames sent" while looking healthy. One magic argument
-// returns a distinctive answer no real caller would ask for, so the firmware
-// can ask "did MY definition actually link?" and say so on screen instead of
-// transmitting into a void.
-// Distinctive enough that no real frame-sanity call would ever use it.
-static constexpr int32_t kRawTxProbe = 0x07A1B2C3;
-
-extern "C" int ieee80211_raw_frame_sanity_check(int32_t arg, int32_t arg2,
-                                                int32_t arg3) {
-    (void)arg2;
-    (void)arg3;
-    if (arg == kRawTxProbe) return 1;   // the probe: this override is linked
-    return 0;                           // every real frame: permitted
-}
+#include "hal/rawtx.h"
 
 namespace orthrus::modules {
 
-// True when OUR definition of the sanity check is the one that linked.
-//
-// Calling the plain name reaches whichever definition won, so a distinctive
-// answer is proof. If the library's version linked instead it returns 0 for
-// this argument like any other, and the surface says injection is unavailable
-// rather than counting up to zero frames sent.
-static bool rawTxAvailable() {
-    return ieee80211_raw_frame_sanity_check(kRawTxProbe, 0, 0) == 1;
-}
+// The raw-transmit override, the runtime probe that proves it linked, and the
+// radio bring-up all live in hal/rawtx.h now. They moved there because the
+// override can only be DEFINED once in a link, and this is no longer the only
+// surface that transmits -- a second copy here would have failed the link
+// rather than producing a subtle bug.
+static bool rawTxAvailable() { return hal::rawTxAvailable(); }
 
 using namespace orthrus::theme;
 namespace bd  = orthrus::board;

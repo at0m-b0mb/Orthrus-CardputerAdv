@@ -12,12 +12,17 @@
 # reported "no effect seen", which reads exactly like a network that is properly
 # protected.
 #
-# A runtime probe in wifi_deauth.cpp catches this on the device. This catches it
+# A runtime probe in hal/rawtx.cpp catches this on the device. This catches it
 # in CI, before anyone flashes it.
+#
+# The definition used to live in wifi_deauth.cpp, which was the only surface
+# that transmitted. It is hal/rawtx.cpp now: the symbol can only be DEFINED
+# once in a link, and the Attack surface transmits too -- a second copy would
+# have failed the link rather than producing a subtle bug.
 set -euo pipefail
 
 SYMBOL="ieee80211_raw_frame_sanity_check"
-OURS="wifi_deauth.cpp.o"
+OURS="rawtx.cpp.o"
 status=0
 
 for env in cardputer-adv cardputer-adv-hid; do
@@ -44,7 +49,8 @@ for env in cardputer-adv cardputer-adv-hid; do
     else
         echo "FAIL ${env}: ${SYMBOL} did NOT come from ${OURS}"
         echo "     got: ${supplier:-<nothing placed>}"
-        echo "     raw 802.11 transmit will be rejected; Deauth will send nothing."
+        echo "     raw 802.11 transmit will be rejected; Deauth and Attack"
+        echo "     will both send nothing while reporting healthy."
         status=1
     fi
 done
